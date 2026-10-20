@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>One Must Fall 2097 — Play in your browser</title>
+<meta name="description" content="Play One Must Fall 2097 (Epic MegaGames, 1994 — freeware) directly in your browser. The OpenOMF engine compiled to WebAssembly: no emulator, no plugins.">
+<meta name="theme-color" content="#00005f">
+<link rel="icon" href="assets/logo.png">
+<style>
+  /* The launcher keeps the game's own NetArena look: NETMEGA.PCX background,
+     the 2097 logo, and lettering in the game's bitmap fonts. */
+  @font-face {
+    font-family: "OMF 2097 Big";
+    src: url(assets/fonts/omf2097-big.woff2) format("woff2");
+    font-display: swap;
+  }
+  @font-face {
+    font-family: "OMF 2097 NetArena";
+    src: url(assets/fonts/omf2097-netarena.woff2) format("woff2");
+    font-display: swap;
+  }
+  :root { --navy: #00005f; --red: #670000; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+  body { font-family: "OMF 2097 Big", monospace; color: #a7a7ff; }
+
+  #launcher {
+    position: fixed; inset: 0; z-index: 10;
+    display: grid; place-items: center; background: #000;
+    transition: opacity .5s steps(5), visibility 0s .5s;
+  }
+  #launcher.off { opacity: 0; visibility: hidden; }
+  #stage, #hud { grid-area: 1 / 1; }
+  /* Stage is exactly as tall as the art, so the band colours (rows 0-38 navy,
+     39-162 red, 163-199 navy of 200) continue the image seamlessly. */
+  #stage {
+    width: 100vw; height: min(100vh, 62.5vw);
+    display: grid; place-items: center;
+    background: linear-gradient(var(--navy) 0 19.5%, var(--red) 19.5% 81.5%, var(--navy) 81.5%);
+  }
+  #art {
+    height: 100%; aspect-ratio: 8 / 5;
+    background: url(assets/netmega.png) 0 0 / 100% 100% no-repeat;
+    image-rendering: pixelated;
+  }
+  /* HUD on top of the art 1:1; --u is one pixel of the 320x200 art. */
+  #hud {
+    position: relative; width: min(100vw, 160vh); aspect-ratio: 8 / 5;
+    container-type: size; --u: calc(100cqw / 320);
+    display: grid; place-items: center;
+  }
+  #logo {
+    position: absolute; left: calc(200 * var(--u)); top: calc(42 * var(--u));
+    width: calc(108 * var(--u)); height: auto;
+    image-rendering: pixelated;
+    filter: drop-shadow(0 0 calc(3 * var(--u)) rgba(0, 0, 0, .55));
+  }
+  #menu {
+    width: calc(180 * var(--u));
+    padding: calc(6 * var(--u));
+    background: rgba(0, 0, 83, .88);
+    outline: calc(1 * var(--u)) solid #000077;
+    text-align: center;
+  }
+  #menu h2 {
+    margin: 0 0 calc(4 * var(--u));
+    font: calc(8 * var(--u)) "OMF 2097 Big";
+    color: #cf5b00; letter-spacing: 0;
+  }
+  #start, #dos {
+    display: block; width: 100%; margin: 0 auto;
+    padding: calc(3 * var(--u)) 0 calc(4 * var(--u));
+    border: 0; background: none; cursor: pointer;
+    font: calc(8 * var(--u)) "OMF 2097 Big";
+    color: #7982c7; text-shadow: 0 calc(1 * var(--u)) 0 #3c3c65;
+  }
+  #start:hover, #start:focus-visible, #dos:hover, #dos:focus-visible {
+    color: #cbcbff; outline: none; text-shadow: 0 0 calc(2 * var(--u)) #cbcbff;
+  }
+  #keys {
+    margin: calc(5 * var(--u)) 0 0;
+    font: calc(6 * var(--u)) / calc(9 * var(--u)) "OMF 2097 Big";
+    color: #7982c7; text-align: left;
+  }
+  #keys b { color: #cf5b00; font-weight: normal; }
+  #status {
+    margin: calc(4 * var(--u)) 0 0;
+    font: calc(6 * var(--u)) "OMF 2097 Big"; color: #cbcbff;
+    min-height: calc(9 * var(--u));
+  }
+  /* Portrait: art becomes a banner, menu below it. */
+  @media (max-aspect-ratio: 1/1) {
+    #launcher { overflow-y: auto; background: var(--red); }
+    #stage { height: 62.5vw; }
+    #hud {
+      position: static; width: auto; aspect-ratio: auto; container-type: normal;
+      display: flex; flex-direction: column; align-items: center; gap: 16px;
+      padding: 16px 16px 40px;
+    }
+    #logo { position: static; width: min(80vw, 380px); }
+    #menu { width: min(92vw, 420px); padding: 12px; outline-width: 1px; }
+    #menu h2 { font-size: 24px; margin-bottom: 8px; }
+    #start, #dos { font-size: 22px; padding: 8px 0; }
+    #keys { font-size: 16px; line-height: 24px; margin-top: 12px; }
+    #status { font-size: 15px; min-height: 24px; }
+  }
+  @media (prefers-reduced-motion: reduce) { #launcher { transition: none; } }
+
+  /* The game draws into this canvas, scaled by CSS, pixelated. */
+  #stage-game { position: fixed; inset: 0; display: none; background: #000; }
+  #stage-game.on { display: block; }
+  #canvas {
+    position: absolute; inset: 0; margin: auto;
+    width: 100%; height: 100%; object-fit: contain;
+    image-rendering: pixelated; outline: none;
+  }
+  /* Floating buttons: full screen, and back when the game has quit. */
+  #tools {
+    position: fixed; z-index: 11;
+    top: calc(env(safe-area-inset-top) + 10px); left: calc(env(safe-area-inset-left) + 10px);
+    display: flex; gap: 6px; transition: opacity .3s;
+  }
+  #tools.idle { opacity: 0; pointer-events: none; }
+  #tools[hidden] { display: none; }
+  .tool {
+    padding: 6px 10px; border: 1px solid #000077; background: rgba(0, 0, 83, .85);
+    color: #7982c7; font: 14px "OMF 2097 Big"; cursor: pointer;
+  }
+  .tool:hover, .tool:focus-visible { color: #cbcbff; outline: none; }
+</style>
+</head>
+<body>
+
+<main id="launcher">
+  <div id="stage" aria-hidden="true"><div id="art"></div></div>
+  <div id="hud">
+    <h1><img id="logo" src="assets/logo.png" width="306" height="192" alt="One Must Fall 2097"></h1>
+    <section id="menu" aria-label="Main menu">
+      <h2>REGULAR GAME</h2>
+      <button id="start" type="button">PLAY (WASM, NO EMULATOR)</button>
+      <button id="dos" type="button">PLAY (DOS EMULATION)</button>
+      <p id="keys">
+        <b>P1</b> ARROWS MOVE &middot; ENTER PUNCH &middot; RSHIFT KICK<br>
+        <b>P2</b> WASD + QEZC &middot; LSHIFT PUNCH &middot; LCTRL KICK<br>
+        ESC MENU &middot; ENTER CONFIRM
+      </p>
+      <p id="status" role="status"></p>
+    </section>
+  </div>
+</main>
+
+<div id="stage-game">
+  <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="0"></canvas>
+</div>
+<div id="tools" hidden>
+  <button id="fs" class="tool" type="button" title="Full screen (F11)">FULL SCREEN</button>
+  <button id="back" class="tool" type="button" hidden>BACK</button>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const status = (s) => { $("status").textContent = s; };
+
+  $("dos").addEventListener("click", () => { location.href = "dos.html"; });
+
+  let started = false;
+  $("start").addEventListener("click", async () => {
+    if (started) return;
+    started = true;
+    $("start").disabled = true;
+    status("LOADING WASM ENGINE...");
+
+    // The ETag trick: a new cache entry after every deploy, so returning
+    // players never keep an old engine or an old data pack.
+    let v = "";
+    try {
+      const r = await fetch("wasm/openomf.wasm", { method: "HEAD" });
+      v = r.ok && r.headers.get("etag") ? "?v=" + encodeURIComponent(r.headers.get("etag")) : "";
+    } catch (e) { /* offline or filtered: load without version pin */ }
+
+    const Module = {
+      canvas: $("canvas"),
+      // Read-only game data at /, saved scores and config in /state.
+      ENV: { OPENOMF_RESOURCE_PATH: "/", OPENOMF_STATE_PATH: "/", OPENOMF_CONFIG_PATH: "/" },
+      locateFile: (p) => "wasm/" + p + v,
+      monitorRunDependencies: (left) => {
+        if (left > 0) status("LOADING GAME DATA... (" + left + ")");
+      },
+      print: (t) => { (window.__omflog = window.__omflog || []).push(String(t)); console.log("[omf]", t); },
+      printErr: (t) => { (window.__omflog = window.__omflog || []).push("E " + t); console.warn("[omf]", t); },
+      onRuntimeInitialized: () => { status("RUNTIME READY"); },
+      onExit: (c) => {
+        (window.__omflog = window.__omflog || []).push("EXIT code " + c);
+        status("GAME CLOSED (code " + c + ")");
+        $("back").hidden = false;
+        $("tools").classList.remove("idle");
+      },
+      onAbort: (why) => status("FAILED: " + why),
+    };
+    window.Module = Module;
+
+    const s = document.createElement("script");
+    s.src = "wasm/openomf.js";
+    s.onerror = () => status("COULD NOT LOAD wasm/openomf.js");
+    document.body.appendChild(s);
+
+    const on = () => {
+      $("launcher").classList.add("off");
+      $("stage-game").classList.add("on");
+      $("tools").hidden = false;
+      $("canvas").focus();
+    };
+    const check = setInterval(() => {
+      if ($("canvas").width > 0) { on(); clearInterval(check); }
+    }, 200);
+  });
+
+  // Full screen, and keep the buttons out of the way while the mouse rests.
+  $("fs").addEventListener("click", () => {
+    const d = document;
+    if (d.fullscreenElement) d.exitFullscreen();
+    else d.documentElement.requestFullscreen?.();
+  });
+  $("back").addEventListener("click", () => location.reload());
+
+  let idle;
+  const wake = () => {
+    $("tools").classList.remove("idle");
+    clearTimeout(idle);
+    idle = setTimeout(() => $("tools").classList.add("idle"), 2500);
+  };
+  document.addEventListener("mousemove", wake);
+  wake();
+
+  // Arrows and space scroll the page otherwise.
+  document.addEventListener("keydown", (e) => {
+    if ($("stage-game").classList.contains("on") &&
+        ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "PageUp", "PageDown"].includes(e.key)) {
+      e.preventDefault();
+    }
+  });
+})();
+</script>
+</body>
+</html>
