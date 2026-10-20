@@ -156,7 +156,6 @@
     <section id="menu" aria-label="Main menu">
       <h2>REGULAR GAME</h2>
       <button id="start" type="button">PLAY (WASM, NO EMULATOR)</button>
-      <button id="dos" type="button">PLAY (DOS EMULATION)</button>
       <p id="keys">
         <b>P1</b> ARROWS MOVE &middot; ENTER PUNCH &middot; RSHIFT KICK<br>
         <b>P2</b> WASD + QEZC &middot; LSHIFT PUNCH &middot; LCTRL KICK<br>
@@ -186,8 +185,6 @@
   "use strict";
   const $ = (id) => document.getElementById(id);
   const status = (s) => { $("status").textContent = s; };
-
-  $("dos").addEventListener("click", () => { location.href = "https://mich-de.github.io/omf2097/"; });
 
   let started = false;
   $("start").addEventListener("click", async () => {

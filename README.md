@@ -33,8 +33,6 @@ No install needed: open **https://mich-de.github.io/openomf2097/** and press **P
 - **Single player and local two-player** are both supported; online play is not wired up (the menu's NETWORK PLAY needs a server this site doesn't run).
 - **Company networks:** web filters such as Zscaler may cut the download (the data pack looks like an archive of DOS programs to them). The page says so and offers to try again; the fix is another network, or asking IT to allow `mich-de.github.io`.
 
-Prefer the original DOS game under DOSBox-X? It lives on its own site now: **[mich-de.github.io/omf2097](https://mich-de.github.io/omf2097/)** ([mich-de/omf2097](https://github.com/mich-de/omf2097)).
-
 One Must Fall 2097 has been freeware since 1999. This repo is also the site: GitHub Pages serves it straight from the root.
 
 ## Gameplay
@@ -147,8 +145,6 @@ Rebuild them with `pip install fonttools brotli`, then `python3 tools/build_font
 | `assets/fonts/` | The game's three bitmap fonts as TTF and WOFF2, plus a specimen |
 | `cdp_shot.js` | Drives Chrome over CDP: load, wait, click, screenshot, evaluate |
 | `screenshots/` | Gameplay shots and the development screenshots shown above |
-
-The DOSBox-X build of the original game, its bundle and the headless emulator probes live in [mich-de/omf2097](https://github.com/mich-de/omf2097).
 
 ## Tools
 
