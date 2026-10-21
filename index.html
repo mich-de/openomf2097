@@ -213,7 +213,8 @@
       title,
       "GPU: " + renderer,
       "screen " + screen.width + "x" + screen.height + " @" + devicePixelRatio + ", canvas " + canvas.width + "x" + canvas.height,
-      "quality: framebuffer up to " + q.omfMaxScale + "x, robots " + q.omfSpriteScale + "x",
+      "quality: framebuffer up to " + q.omfMaxScale + "x, robots " + q.omfSpriteScale + "x, " +
+        (q.omfFps ? q.omfFps + " fps" : "fps: measuring"),
       ...problems.slice(-8),
       "--- engine log ---",
       ...engineLog().trim().split("\n").slice(-25),
@@ -280,7 +281,8 @@
     s.onerror = () => status("COULD NOT LOAD wasm/openomf.js");
     document.body.appendChild(s);
 
-    // Watch the frame rate while playing: below 40 fps for 8 seconds running, draw lighter.
+    // Watch the frame rate while playing: below 40 fps for 3 seconds, draw lighter, by as much
+    // as the frame rate says (at 20 fps, about half the framebuffer scale).
     // The engine re-reads omfMaxScale every second; sprite detail follows on the next load.
     const watchFrameRate = () => {
       let last = performance.now(), frames = 0, slow = 0, from = last;
@@ -292,11 +294,13 @@
           frames = 0;
         }
         last = now;
-        if (now - from >= 4000) {
+        if (now - from >= 3000) {
           const fps = frames * 1000 / (now - from);
+          Module.omfFps = Math.round(fps);
           slow = fps < 40 ? slow + 1 : 0;
-          if (slow >= 2 && Module.omfMaxScale > 1) {
-            Module.omfMaxScale -= 1;
+          if (slow >= 1 && Module.omfMaxScale > 1) {
+            const scale = Module.omfMaxScale;
+            Module.omfMaxScale = Math.max(1, Math.min(scale - 1, Math.floor(scale * fps / 45)));
             Module.omfSpriteScale = Module.omfMaxScale >= 4 ? 4 : Module.omfMaxScale >= 2 ? 2 : 1;
             slow = -1; // give the lighter setting a window to settle
           }

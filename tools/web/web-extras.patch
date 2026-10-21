@@ -36,9 +36,151 @@
      }
  }
  
+--- a/src/controller/keyboard.c
++++ b/src/controller/keyboard.c
+@@ -2,6 +2,7 @@
+ #include "utils/allocator.h"
+ #include "utils/log.h"
+ #include <stdlib.h>
++#include <string.h>
+ 
+ void keyboard_free(controller *ctrl) {
+     keyboard *k = ctrl->data;
+@@ -9,6 +10,26 @@
+     omf_free(k);
+ }
+ 
++// Keys pressed since the last game tick. The game reads the keys' state once per tick, so
++// without this a press and release between two ticks (a quick tap on a slow device, or the
++// touch pad's buttons) would never be seen.
++static bool latched[SDL_NUM_SCANCODES];
++
++void keyboard_latch_press(SDL_Scancode sc) {
++    if(sc >= 0 && sc < SDL_NUM_SCANCODES) {
++        latched[sc] = true;
++    }
++}
++
++void keyboard_latch_clear(void) {
++    memset(latched, 0, sizeof(latched));
++}
++
++// Down now, or pressed since the last tick.
++static inline bool key_down(const unsigned char *state, SDL_Scancode sc) {
++    return state[sc] || latched[sc];
++}
++
+ static inline void keyboard_cmd(controller *ctrl, int action, ctrl_event **ev) {
+     controller_cmd(ctrl, action, ev);
+ }
+@@ -18,37 +39,37 @@
+     ctrl->current = 0;
+     const unsigned char *state = SDL_GetKeyboardState(NULL);
+     int action = 0;
+-    if(state[k->keys->jump_left]) {
++    if(key_down(state, k->keys->jump_left)) {
+         action = ACT_UP | ACT_LEFT;
+-    } else if(state[k->keys->duck_back]) {
++    } else if(key_down(state, k->keys->duck_back)) {
+         action = ACT_DOWN | ACT_LEFT;
+-    } else if(state[k->keys->jump_right]) {
++    } else if(key_down(state, k->keys->jump_right)) {
+         action = ACT_UP | ACT_RIGHT;
+-    } else if(state[k->keys->duck_forward]) {
++    } else if(key_down(state, k->keys->duck_forward)) {
+         action = ACT_DOWN | ACT_RIGHT;
+-    } else if(state[k->keys->walk_back] && state[k->keys->jump_up]) {
++    } else if(key_down(state, k->keys->walk_back) && key_down(state, k->keys->jump_up)) {
+         action = ACT_UP | ACT_LEFT;
+-    } else if(state[k->keys->walk_back] && state[k->keys->duck]) {
++    } else if(key_down(state, k->keys->walk_back) && key_down(state, k->keys->duck)) {
+         action = ACT_DOWN | ACT_LEFT;
+-    } else if(state[k->keys->walk_right] && state[k->keys->jump_up]) {
++    } else if(key_down(state, k->keys->walk_right) && key_down(state, k->keys->jump_up)) {
+         action = ACT_UP | ACT_RIGHT;
+-    } else if(state[k->keys->walk_right] && state[k->keys->duck]) {
++    } else if(key_down(state, k->keys->walk_right) && key_down(state, k->keys->duck)) {
+         action = ACT_DOWN | ACT_RIGHT;
+-    } else if(state[k->keys->walk_right]) {
++    } else if(key_down(state, k->keys->walk_right)) {
+         action = ACT_RIGHT;
+-    } else if(state[k->keys->walk_back]) {
++    } else if(key_down(state, k->keys->walk_back)) {
+         action = ACT_LEFT;
+-    } else if(state[k->keys->jump_up]) {
++    } else if(key_down(state, k->keys->jump_up)) {
+         action = ACT_UP;
+-    } else if(state[k->keys->duck]) {
++    } else if(key_down(state, k->keys->duck)) {
+         action = ACT_DOWN;
+     }
+ 
+-    if(state[k->keys->punch]) {
++    if(key_down(state, k->keys->punch)) {
+         action |= ACT_PUNCH;
+     }
+ 
+-    if(state[k->keys->kick]) {
++    if(key_down(state, k->keys->kick)) {
+         action |= ACT_KICK;
+     }
+ 
+@@ -91,26 +112,26 @@
+         ctrl->queued = ACT_NONE;
+     }
+ 
+-    if(state[SDL_SCANCODE_RIGHT] || state[SDL_SCANCODE_KP_6]) {
++    if(key_down(state, SDL_SCANCODE_RIGHT) || key_down(state, SDL_SCANCODE_KP_6)) {
+         controller_cmd(ctrl, ACT_RIGHT, ev);
+     }
+-    if(state[SDL_SCANCODE_LEFT] || state[SDL_SCANCODE_KP_4]) {
++    if(key_down(state, SDL_SCANCODE_LEFT) || key_down(state, SDL_SCANCODE_KP_4)) {
+         controller_cmd(ctrl, ACT_LEFT, ev);
+     }
+-    if(state[SDL_SCANCODE_UP] || state[SDL_SCANCODE_KP_8]) {
++    if(key_down(state, SDL_SCANCODE_UP) || key_down(state, SDL_SCANCODE_KP_8)) {
+         controller_cmd(ctrl, ACT_UP, ev);
+     }
+-    if(state[SDL_SCANCODE_DOWN] || state[SDL_SCANCODE_KP_2]) {
++    if(key_down(state, SDL_SCANCODE_DOWN) || key_down(state, SDL_SCANCODE_KP_2)) {
+         controller_cmd(ctrl, ACT_DOWN, ev);
+     }
+-    if(state[SDL_SCANCODE_RETURN] || state[SDL_SCANCODE_KP_ENTER]) {
++    if(key_down(state, SDL_SCANCODE_RETURN) || key_down(state, SDL_SCANCODE_KP_ENTER)) {
+         controller_cmd(ctrl, ACT_PUNCH, ev);
+     }
+-    if(state[SDL_SCANCODE_RSHIFT] || state[SDL_SCANCODE_KP_0]) {
++    if(key_down(state, SDL_SCANCODE_RSHIFT) || key_down(state, SDL_SCANCODE_KP_0)) {
+         controller_cmd(ctrl, ACT_KICK, ev);
+     }
+ 
+-    if(state[SDL_SCANCODE_ESCAPE]) {
++    if(key_down(state, SDL_SCANCODE_ESCAPE)) {
+         controller_cmd(ctrl, ACT_ESC, ev);
+     }
+ }
+--- a/src/controller/keyboard.h
++++ b/src/controller/keyboard.h
+@@ -27,6 +27,8 @@
+ };
+ 
+ void keyboard_create(controller *ctrl, keyboard_keys *keys);
++void keyboard_latch_press(SDL_Scancode sc);
++void keyboard_latch_clear(void);
+ void keyboard_free(controller *ctrl);
+ int keyboard_binds_key(controller *ctrl, SDL_Event *event);
+ 
 --- a/src/engine.c
 +++ b/src/engine.c
-@@ -240,7 +240,16 @@
+@@ -2,6 +2,7 @@
+ #include "audio/audio.h"
+ #include "console/console.h"
+ #include "controller/controller.h"
++#include "controller/keyboard.h"
+ #include "formats/altpal.h"
+ #include "formats/rec.h"
+ #include "game/game_player.h"
+@@ -240,7 +241,16 @@
      uint64_t frame_start = SDL_GetTicks64(); // Set game tick timer
      int dynamic_wait = 0;
      int static_wait = 0;
@@ -55,6 +197,24 @@
          // Handle events
          bool check_fs;
          while(SDL_PollEvent(&e)) {
+@@ -250,6 +260,9 @@
+                     run = 0;
+                     break;
+                 case SDL_KEYDOWN:
++                    if(!e.key.repeat) {
++                        keyboard_latch_press(e.key.keysym.scancode); // seen by the next tick even if let go
++                    }
+                     if(e.key.keysym.sym == SDLK_F1) {
+                         video_schedule_screenshot(save_screenshot);
+                     }
+@@ -429,6 +442,7 @@
+             has_dynamic = dynamic_wait > dyntick_ms;
+             if(has_dynamic) {
+                 game_state_dynamic_tick(gs, false);
++                keyboard_latch_clear(); // the tick has read the keys
+                 dynamic_wait -= dyntick_ms;
+                 if(gs->delay > 0) {
+                     log_debug("applying delay %d", gs->delay);
 --- a/src/game/common_defines.c
 +++ b/src/game/common_defines.c
 @@ -19,8 +19,9 @@
