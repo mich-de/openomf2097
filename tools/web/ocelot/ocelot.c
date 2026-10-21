@@ -1,17 +1,18 @@
 // Builds OCELOT, a twelfth robot, from JAGUAR's game files and the hand-drawn frames
-// in tools/web/ocelot/art:
+// in tools/web/ocelot/art, and TIGRIS, the same robot in a tiger's coat, from the frames
+// tools/web/tigris paints from those:
 //
-//   ocelot <resources-dir> <art-dir>
+//   ocelot <resources-dir> <art-dir> ocelot|tigris
 //
 // reads  FIGHTR0.AF (Jaguar), ALTPALS.DAT, VS.BK, <art-dir>/mMM_fFF.png
-// writes FIGHTR11.AF (Ocelot's moves, Jaguar's 8-bit pixels as a fallback),
-//        FIGHTR11.X16 (its 16-bit pixels and own colors, see game/utils/har_extended.h)
-//        and VS.BK with Ocelot's portrait appended as sprite 11
+// writes FIGHTR<id>.AF (the robot's moves, Jaguar's 8-bit pixels as a fallback),
+//        FIGHTR<id>.X16 (its 16-bit pixels and own colors, see game/utils/har_extended.h)
+//        and VS.BK with its portrait appended as sprite <id>: OCELOT is 11, TIGRIS 12
 //
 // The art is Jaguar's frames, exported 4x in pilot Milano's colors and repainted
 // (a jaguar's coat, a cat's head, a tail): one PNG per sprite, the same size as the
 // sprite at 4x, transparent where the sprite is. Each 4x4 block becomes one pixel.
-// Its colors become Ocelot's own palette, up to 383 colors, kept exactly when the art
+// Its colors become Ocelot's own palette, up to 319 colors, kept exactly when the art
 // has no more than that: in FIGHTR11.X16 a pixel of value 257 + k is color k, and values
 // below 256 keep meaning the colors every arena shares (the fire).
 //
@@ -20,7 +21,7 @@
 //
 // Palette notes (indices 160..249 are shared by every arena, MELEE.BK and VS.BK):
 //   1..47     Jaguar's HAR colors (P2 is drawn +48), 32..47 its plating
-//   257..639  Ocelot's own colors (16-bit pixels; P2's are drawn +384)
+//   257..575  Ocelot's own colors (16-bit pixels; P2's are drawn +384)
 //   176..183 red, 240..243 orange to yellow, 207 pale yellow, 223 white: the fire
 #include <math.h>
 #include <png.h>
@@ -42,7 +43,7 @@
 #include "utils/vector.h"
 
 #define HAR_COLORS 48
-#define OCELOT_COLORS 383 // the extended palette has room for this many per player
+#define OCELOT_COLORS 319 // the extended palette has room for this many per player (HAR_EXTENDED_COLORS)
 #define EXTENDED_BASE 257 // pixel value of Ocelot's color 0
 #define PORTRAIT_COLORS 159 // an 8-bit portrait reaches its first 159 colors (bytes 1..159)
 #define SHARED_FIRST 160  // the colors every arena, MELEE.BK and VS.BK share
@@ -55,7 +56,10 @@
 #define MOVE_SHOT 38       // its projectile
 #define MOVE_SHOT_HIT 37   // the projectile's impact
 #define VS_HAR_PORTRAITS 5 // VS.BK animation holding one big portrait per HAR
-#define OCELOT_ID 11
+
+// The robot being built: OCELOT (11, spotted) or TIGRIS (12, striped).
+static int robot_id;
+static bool striped;
 
 // pilot Milano's colors, which the art was painted over: altpal ramps per HAR ramp
 static const int milano_ramps[3] = {7, 12, 11};
@@ -127,7 +131,7 @@ static int by_count(const void *a, const void *b) {
     return ((const color_count *)b)->count - ((const color_count *)a)->count;
 }
 
-// Ocelot's colors: the art's own, or k-means over them when there are more than 383.
+// Ocelot's colors: the art's own, or k-means over them when there are more than 319.
 // Most used first, so the 8-bit portrait's 159 get the colors that matter.
 static void build_palette(const color_set *set) {
     const int k = OCELOT_COLORS;
@@ -424,7 +428,9 @@ static const char *stamps[][STAMP] = {
 
 // The art's fur, from shadow to light: plating shades are matched to it, not to Milano.
 static unsigned char portrait_fur(int shade) {
-    static const vga_color stops[4] = {{47, 31, 16}, {141, 107, 60}, {199, 159, 92}, {237, 194, 114}};
+    static const vga_color jaguar[4] = {{47, 31, 16}, {141, 107, 60}, {199, 159, 92}, {237, 194, 114}};
+    static const vga_color tiger[4] = {{70, 22, 4}, {170, 62, 8}, {232, 112, 22}, {255, 200, 140}};
+    const vga_color *stops = striped ? tiger : jaguar;
     float t = (shade < 0 ? 0 : shade > 15 ? 15 : shade) / 15.0f * 3.0f;
     int i = t >= 3.0f ? 2 : (int)t;
     float f = t - i;
@@ -433,8 +439,31 @@ static unsigned char portrait_fur(int shade) {
                                       (uint8_t)(a.b + (b.b - a.b) * f)});
 }
 
-// The VS portrait has no hand-drawn version: Jaguar's, in Ocelot's colors, with spots
-// scattered over the plating.
+// Smooth value noise, about one feature per `cell` pixels.
+static float value_noise(float x, float y, float cell, uint32_t seed) {
+    x /= cell;
+    y /= cell;
+    int ix = (int)floorf(x), iy = (int)floorf(y);
+    float fx = x - ix, fy = y - iy;
+    fx = fx * fx * (3 - 2 * fx);
+    fy = fy * fy * (3 - 2 * fy);
+    float v00 = hash01(ix, iy, seed), v10 = hash01(ix + 1, iy, seed);
+    float v01 = hash01(ix, iy + 1, seed), v11 = hash01(ix + 1, iy + 1, seed);
+    return (v00 * (1 - fx) + v10 * fx) * (1 - fy) + (v01 * (1 - fx) + v11 * fx) * fy;
+}
+
+// Whether a tiger's stripe covers the portrait's pixel: broken, tapering, slightly wavy bands
+// across the body, as tools/web/tigris paints them on the robot (there 4x finer).
+static bool portrait_stripe(int x, int y) {
+    float phase = (y + 2.2f * (value_noise(x, y, 10, 1) - 0.5f) + 0.12f * x) / 8.5f;
+    float d = fabsf(phase - floorf(phase) - 0.5f) * 2;
+    int band = (int)floorf(phase);
+    float width = 0.56f * (value_noise(x + band * 24.0f, band * 3.0f, 6.5f, 2) * 1.6f - 0.3f);
+    return d < width;
+}
+
+// The VS portrait has no hand-drawn version: Jaguar's, in the robot's colors, with spots
+// scattered over the plating, or stripes across it.
 static void paint_portrait_coat(canvas *c) {
     unsigned char *src = malloc((size_t)c->w * c->h);
     memcpy(src, c->px, c->w * c->h);
@@ -445,7 +474,14 @@ static void paint_portrait_coat(canvas *c) {
     for(int i = 0; i < c->w * c->h; i++) {
         if(src[i] >= PLATE_FIRST && src[i] <= PLATE_LAST) {
             c->px[i] = portrait_fur(src[i] - PLATE_FIRST);
+            if(striped && portrait_stripe(c->x + i % c->w, c->y + i / c->w)) {
+                c->px[i] = spot;
+            }
         }
+    }
+    if(striped) {
+        free(src);
+        return;
     }
     for(int oy = sy / 2; oy < c->h; oy += sy) {
         for(int ox = ((oy / sy) & 1 ? sx / 2 : 0) + 2; ox < c->w; ox += sx) {
@@ -632,7 +668,7 @@ static int make_ocelot(const char *dir, const char *art_dir) {
         fprintf(stderr, "cannot read %s\n", fn);
         return 1;
     }
-    af.fighter_id = OCELOT_ID;
+    af.fighter_id = robot_id;
 
     // the art, and its colors
     art_frame *art[70][32] = {{NULL}};
@@ -672,7 +708,7 @@ static int make_ocelot(const char *dir, const char *art_dir) {
         return 1;
     }
     build_palette(&colors);
-    printf("%d frames of art, %d colors: %d in Ocelot's palette", frames, colors.n, ocelot_count);
+    printf("%d frames of art, %d colors: %d in the robot's palette", frames, colors.n, ocelot_count);
     if(mixed) {
         printf(" (frames with finer detail than 4x4 blocks are kept at 4x)");
     }
@@ -753,7 +789,7 @@ static int make_ocelot(const char *dir, const char *art_dir) {
         }
     }
 
-    snprintf(fn, sizeof(fn), "%s/FIGHTR11.AF", dir);
+    snprintf(fn, sizeof(fn), "%s/FIGHTR%d.AF", dir, robot_id);
     path_from_c(&p, fn);
     if(sd_af_save(&af, &p) != SD_SUCCESS) {
         fprintf(stderr, "cannot write %s\n", fn);
@@ -762,7 +798,7 @@ static int make_ocelot(const char *dir, const char *art_dir) {
     sd_af_free(&af);
     printf("wrote %s\n", fn);
 
-    snprintf(fn, sizeof(fn), "%s/FIGHTR11.X16", dir);
+    snprintf(fn, sizeof(fn), "%s/FIGHTR%d.X16", dir, robot_id);
     if(!x16_write(fn, frames_x16, frame_count)) {
         fprintf(stderr, "cannot write %s\n", fn);
         return 1;
@@ -784,7 +820,7 @@ static int make_vs_portrait(const char *dir) {
     }
     sd_animation *ani = sd_bk_get_anim(&bk, VS_HAR_PORTRAITS)->animation;
     int count = sd_animation_get_sprite_count(ani);
-    if(count > OCELOT_ID + 1 || count < OCELOT_ID) {
+    if(count < robot_id) {
         fprintf(stderr, "unexpected VS.BK: %d HAR portraits\n", count);
         return 1;
     }
@@ -811,9 +847,9 @@ static int make_vs_portrait(const char *dir) {
     sd_sprite_create(&spr);
     canvas_to_sprite(&c, &spr);
     free(c.px);
-    spr.index = OCELOT_ID;
-    if(count == OCELOT_ID + 1) {
-        sd_animation_set_sprite(ani, OCELOT_ID, &spr); // rebuilt over a previous run
+    spr.index = robot_id;
+    if(count > robot_id) {
+        sd_animation_set_sprite(ani, robot_id, &spr); // rebuilt over a previous run
     } else {
         sd_animation_push_sprite(ani, &spr);
     }
@@ -823,14 +859,16 @@ static int make_vs_portrait(const char *dir) {
         return 1;
     }
     sd_bk_free(&bk);
-    printf("wrote %s (portrait %d)\n", fn, OCELOT_ID);
+    printf("wrote %s (portrait %d)\n", fn, robot_id);
     return 0;
 }
 
 int main(int argc, char **argv) {
-    if(argc != 3) {
-        fprintf(stderr, "usage: %s <resources-dir> <art-dir>\n", argv[0]);
+    if(argc != 4 || (strcmp(argv[3], "ocelot") && strcmp(argv[3], "tigris"))) {
+        fprintf(stderr, "usage: %s <resources-dir> <art-dir> ocelot|tigris\n", argv[0]);
         return 2;
     }
+    striped = !strcmp(argv[3], "tigris");
+    robot_id = striped ? 12 : 11;
     return make_ocelot(argv[1], argv[2]) || make_vs_portrait(argv[1]);
 }

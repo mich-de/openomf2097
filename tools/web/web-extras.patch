@@ -4,32 +4,32 @@
              pilot->learning = 3.0;
              pilot->forget = 0.25;
              break;
-+        case PILOT_TRUMP:
-+            // web build: walks straight in and grabs
-+            pilot->att_normal = 50;
-+            pilot->att_hyper = 30;
-+            pilot->att_jump = 5;
-+            pilot->ap_throw = 100;
-+            pilot->ap_special = 25;
-+            pilot->ap_jump = -50;
-+            pilot->ap_high = 50;
-+            pilot->pref_jump = -20;
-+            pilot->pref_fwd = 50;
-+            pilot->pref_back = -30;
++        case PILOT_JAGUAR:
++            // web build: keeps its distance, then pounces from the air
++            pilot->att_normal = 30;
++            pilot->att_hyper = 40;
++            pilot->att_jump = 60;
++            pilot->ap_throw = 50;
++            pilot->ap_special = 60;
++            pilot->ap_jump = 80;
++            pilot->ap_high = 40;
++            pilot->pref_jump = 40;
++            pilot->pref_fwd = 20;
++            pilot->pref_back = 10;
 +            pilot->learning = 1.0f;
 +            pilot->forget = 0.3f;
 +            break;
-+        case PILOT_MUSK:
-+            // web build: keeps away, shoots, learns fast
-+            pilot->att_normal = 25;
++        case PILOT_TIGER:
++            // web build: presses forward and hits hard, low
++            pilot->att_normal = 60;
 +            pilot->att_hyper = 40;
-+            pilot->att_jump = 25;
-+            pilot->att_sniper = 40;
-+            pilot->ap_special = 100;
-+            pilot->ap_jump = 50;
-+            pilot->ap_low = 25;
-+            pilot->pref_jump = 20;
-+            pilot->pref_back = 15;
++            pilot->att_jump = 10;
++            pilot->ap_close = 60;
++            pilot->ap_special = 60;
++            pilot->ap_jump = -30;
++            pilot->ap_low = 50;
++            pilot->pref_jump = -10;
++            pilot->pref_back = -40;
 +            pilot->learning = 4.0f;
 +            pilot->forget = 0.1f;
 +            break;
@@ -282,7 +282,7 @@
 -                                  "IBRAHIM", "ANGEL",   "COSSETTE", "RAVEN",     "KREISSACK"};
 +const char *pilot_type_names[] = {"CRYSTAL", "STEFFAN",   "MILANO", "CHRISTIAN", "SHIRRO",
 +                                  "JEAN-PAUL", "IBRAHIM", "ANGEL",  "COSSETTE",  "RAVEN",
-+                                  "KREISSACK", "TRUMP",   "MUSK"};
++                                  "KREISSACK", "JAGUAR",  "TIGER"};
  
  const char *har_type_names[] = {"JAGUAR",   "SHADOW", "THORN",    "PYROS",   "ELECTRA", "KATANA",
                                  "SHREDDER", "FLAIL",  "GARGOYLE", "CHRONOS", "NOVA",    "OCELOT"};
@@ -290,7 +290,7 @@
      return lang_get(LANG_STR_HAR + id);
  }
  
-+// The pilots the language files don't know (web build): Trump and Musk.
++// The pilots the language files don't know (web build): Jaguar and Tiger.
 +typedef struct {
 +    const char *name;
 +    const char *bio;
@@ -301,40 +301,40 @@
 +
 +static const extra_pilot extra_pilots[] = {
 +    {
-+        "Trump",
-+        "A real estate tycoon who bought a robot team because the arena had the best ratings. "
-+        "Says nobody has ever piloted better.",
-+        {"Nobody fights better than me. Believe me.", "Tremendous robot. The best. Everybody says so."},
-+        {"Your hair won't save you in the arena.", "Bigly talk. Let's see the robot."},
-+        {"The W.A.R. arena is now Trump Arena. It was a great deal, a very great deal.",
-+         "Kreissack never stood a chance. Many people are saying it was the greatest win in history."},
++        "Jaguar",
++        "A champion of the Amazon's underground arenas, who fights as the big cat hunts: still, then "
++        "all at once. Its robot wears its coat.",
++        {"I have been watching you for a while. You did not see me.", "Patience. Then one bite."},
++        {"Nice coat. It will look good on my wall.", "Here, kitty kitty."},
++        {"With Kreissack beaten, Jaguar goes back to the forest a legend, and the arena's teams paint its coat on their robots.",
++         "Kreissack's base is left to the jungle. Something with golden eyes watches over it now."},
 +    },
 +    {
-+        "Musk",
-+        "An engineer and billionaire who thinks robots are the future and wants to prove it in person. "
-+        "Plans to take the tournament to Mars.",
-+        {"I've already simulated this fight. You lose.", "Interesting. Your robot needs a firmware update."},
-+        {"Can your rockets catch a punch?", "Put that robot back on autopilot."},
-+        {"With the arena's robots Musk founds a company to build them for everyone. Delivery: next year.",
-+         "Kreissack's base becomes the launch pad of the first robot tournament on Mars."},
++        "Tiger",
++        "A brawler from the Siberian taiga who learned to pilot in the snow and to fight in a circus ring. "
++        "Never takes a step back.",
++        {"You smell like prey.", "I do not run. I never needed to."},
++        {"Stripes won't make you any stronger.", "Big cat, small robot."},
++        {"With Kreissack beaten, Tiger is the king of the arena, and its roar opens every W.A.R. season.",
++         "Tiger takes the prize money home and buys the taiga back for the last wild tigers."},
 +    },
 +};
-+#define EXTRA_PILOT(id) (&extra_pilots[(id) - PILOT_TRUMP])
++#define EXTRA_PILOT(id) (&extra_pilots[(id) - PILOT_JAGUAR])
 +
 +const char *pilot_get_lang_name(unsigned int id) {
-+    return id >= PILOT_TRUMP && id < NUMBER_OF_PILOT_TYPES ? EXTRA_PILOT(id)->name : lang_get(20 + id);
++    return id >= PILOT_JAGUAR && id < NUMBER_OF_PILOT_TYPES ? EXTRA_PILOT(id)->name : lang_get(20 + id);
 +}
 +
 +const char *pilot_get_lang_bio(unsigned int id) {
-+    return id >= PILOT_TRUMP && id < NUMBER_OF_PILOT_TYPES ? EXTRA_PILOT(id)->bio : lang_get(135 + id);
++    return id >= PILOT_JAGUAR && id < NUMBER_OF_PILOT_TYPES ? EXTRA_PILOT(id)->bio : lang_get(135 + id);
 +}
 +
 +// What the speaker says to the target in the VS screen: the opening line, or the reply.
 +const char *pilot_get_vs_line(unsigned int speaker, unsigned int target, bool reply) {
-+    if(speaker >= PILOT_TRUMP) {
++    if(speaker >= PILOT_JAGUAR) {
 +        return EXTRA_PILOT(speaker)->says[reply];
 +    }
-+    if(target >= PILOT_TRUMP) {
++    if(target >= PILOT_JAGUAR) {
 +        return EXTRA_PILOT(target)->taunted[reply];
 +    }
 +    return lang_get((reply ? 870 : 749) + 11 * speaker + target);
@@ -342,7 +342,7 @@
 +
 +// The ending texts: part 1 with the pilot's face, part 2 after it.
 +const char *pilot_get_ending_text(unsigned int id, int part) {
-+    if(id >= PILOT_TRUMP && id < NUMBER_OF_PILOT_TYPES) {
++    if(id >= PILOT_JAGUAR && id < NUMBER_OF_PILOT_TYPES) {
 +        return EXTRA_PILOT(id)->ending[part == 1 ? 0 : 1];
 +    }
 +    return lang_get((part == 1 ? 993 : 1003) + id);
@@ -392,8 +392,8 @@
      PILOT_COSSETTE,
      PILOT_RAVEN,
      PILOT_KREISSACK,
-+    PILOT_TRUMP, // web build: two more pilots, see game/utils/har_extended.c for their pictures
-+    PILOT_MUSK,
++    PILOT_JAGUAR, // web build: two more pilots, see game/utils/har_extended.c for their pictures
++    PILOT_TIGER,
      NUMBER_OF_PILOT_TYPES,
 -    // Major Kreissack is not a playable character
 -    NUMBER_OF_PLAYABLE_PILOT_TYPES = NUMBER_OF_PILOT_TYPES - 1,
@@ -522,7 +522,7 @@
              text_set_color(local->current, 0xFD);
  
 -            // Pilot face
-+            // Pilot face (the original ten have one; web build: Trump and Musk don't)
++            // Pilot face (the original ten have one; web build: Jaguar and Tiger don't)
 +            if(p1->pilot->pilot_id >= PILOT_KREISSACK) {
 +                break;
 +            }
@@ -588,7 +588,7 @@
  } cursor_data;
  
 -// The robot page has a sixth column: Nova on top, Ocelot below.
-+// Both pages have a sixth column: Nova and Ocelot on the robot page, Trump and Musk on the
++// Both pages have a sixth column: Nova and Ocelot on the robot page, Jaguar and Tiger on the
 +// pilot page (top and bottom).
  #define EXTRA_COLUMN 5
  #define EXTRA_HARS (NUMBER_OF_HAR_TYPES - HAR_NOVA)
@@ -596,7 +596,7 @@
 -    (local->cursor[player].column == EXTRA_COLUMN ? HAR_NOVA + local->cursor[player].row                               \
 -                                                  : 5 * local->cursor[player].row + local->cursor[player].column)
 +    (local->cursor[player].column == EXTRA_COLUMN                                                                    \
-+         ? (local->page == HAR_SELECT ? HAR_NOVA : PILOT_TRUMP) + local->cursor[player].row                            \
++         ? (local->page == HAR_SELECT ? HAR_NOVA : PILOT_JAGUAR) + local->cursor[player].row                            \
 +         : 5 * local->cursor[player].row + local->cursor[player].column)
  #define CURSOR_A_DONE(local) (local->cursor[0].done)
  #define CURSOR_B_DONE(local) (local->cursor[1].done)
@@ -660,7 +660,7 @@
          bk_pal->colors[idx] = src;
      }
      vga_state_set_base_palette_from_range(bk_pal, 0x00, 0x00, 0x60);
-+    pilot_pictures_load_colors(); // Trump's and Musk's colors, and their dimmed icons' colors
++    pilot_pictures_load_colors(); // Jaguar's and Tiger's colors, and their dimmed icons' colors
  }
  
  static bool check_pilot_stat_cheat(scene *scene, int player_id) {
@@ -757,16 +757,16 @@
 -        // The robot page has cells for Nova and Ocelot; the pilot page has none for Kreissack,
 -        // which the original game handles surprisingly elegantly.
 -        // If we try to naively do that, our pointers all explode.
-+        // note: a/b can be 10 or more (HAR_NOVA, HAR_OCELOT, PILOT_KREISSACK, PILOT_TRUMP, PILOT_MUSK)
++        // note: a/b can be 10 or more (HAR_NOVA, HAR_OCELOT, PILOT_KREISSACK, PILOT_JAGUAR, PILOT_TIGER)
 +        // when returning from VS. The robot page has cells for Nova and Ocelot, the pilot page for
-+        // Trump and Musk; it has none for Kreissack, which the original game handles surprisingly
++        // Jaguar and Tiger; it has none for Kreissack, which the original game handles surprisingly
 +        // elegantly. If we try to naively do that, our pointers all explode.
          if(ids[i] >= HAR_NOVA && local->page == HAR_SELECT) {
              local->cursor[i].column = EXTRA_COLUMN;
              local->cursor[i].row = ids[i] - HAR_NOVA;
-+        } else if(ids[i] >= PILOT_TRUMP && local->page == PILOT_SELECT) {
++        } else if(ids[i] >= PILOT_JAGUAR && local->page == PILOT_SELECT) {
 +            local->cursor[i].column = EXTRA_COLUMN;
-+            local->cursor[i].row = ids[i] - PILOT_TRUMP;
++            local->cursor[i].row = ids[i] - PILOT_JAGUAR;
          } else {
              unsigned id = ids[i] == HAR_NOVA ? HAR_FLAIL : ids[i];
              local->cursor[i].column = id % 5;
@@ -897,7 +897,7 @@
 +}
 +
 +// The pilot grid, six columns like the robots': the original ten icons narrowed around
-+// their middle, Trump and Musk in the sixth column, and the panel of unselected ones.
++// their middle, Jaguar and Tiger in the sixth column, and the panel of unselected ones.
 +static void load_pilot_portraits(scene *scene, melee_local *local) {
 +    animation *icons = &bk_get_info(scene->bk_data, 3)->ani;
 +    for(int i = 0; i < NUMBER_OF_PILOT_TYPES; i++) {
@@ -906,8 +906,8 @@
 +            continue;
 +        }
 +        portrait *target = &local->pilot_portraits[i];
-+        int col = i >= PILOT_TRUMP ? EXTRA_COLUMN : i % 5;
-+        int row = i >= PILOT_TRUMP ? i - PILOT_TRUMP : i / 5;
++        int col = i >= PILOT_JAGUAR ? EXTRA_COLUMN : i % 5;
++        int row = i >= PILOT_JAGUAR ? i - PILOT_JAGUAR : i / 5;
 +        target->x = HAR_CELL_X(col);
 +        target->y = HAR_CELL_Y(row);
 +
@@ -926,7 +926,7 @@
 +
 +        // Copy the face image in dimmed color (shown when not selected)
 +        surface_create_from(&target->disabled, &target->enabled);
-+        if(i >= PILOT_TRUMP) {
++        if(i >= PILOT_JAGUAR) {
 +            pilot_pictures_dim(&target->disabled);
 +        } else {
 +            surface_compress_index_blocks(&target->disabled, 0x60, 0xA0, 64, 16);
@@ -954,7 +954,7 @@
 +        blit_opaque(&local->pilot_panel, &cell, HAR_CELL_X(i % 5), HAR_CELL_Y(i / 5) - PILOT_PANEL_Y);
 +        surface_free(&cell);
 +    }
-+    for(int i = PILOT_TRUMP; i < NUMBER_OF_PILOT_TYPES; i++) {
++    for(int i = PILOT_JAGUAR; i < NUMBER_OF_PILOT_TYPES; i++) {
 +        portrait *target = &local->pilot_portraits[i];
 +        if(target->disabled.data) {
 +            blit_opaque(&local->pilot_panel, &target->disabled, target->x, target->y - PILOT_PANEL_Y);
@@ -999,7 +999,7 @@
      for(int i = 0; i < HAR_NOVA; i++) {
          har_upscale_animation(&bk_get_info(scene->bk_data, 18 + i)->ani);
      }
-+    // Trump's and Musk's pictures, in their own colors
++    // Jaguar's and Tiger's pictures, in their own colors
 +    pilot_pictures_apply(&bk_get_info(scene->bk_data, 4)->ani, &bk_get_info(scene->bk_data, 3)->ani);
      load_pilot_portraits(scene, local);
      load_har_portraits(scene, local);
@@ -1077,7 +1077,7 @@
          object *player1_portrait = omf_calloc(1, sizeof(object));
          object_create(player1_portrait, scene->gs, vec2i_create(-10, 150), vec2f_create(0, 0));
          ani = &bk_get_info(scene->bk_data, 4)->ani;
-+        pilot_pictures_apply(ani, NULL); // Trump's and Musk's faces, in their own colors
++        pilot_pictures_apply(ani, NULL); // Jaguar's and Tiger's faces, in their own colors
          if(player1->chr) {
              object_set_sprite_override(player1_portrait, 1);
              sprite *sp = omf_calloc(1, sizeof(sprite));
@@ -1193,11 +1193,11 @@
 +
 +// The block of 64 entries a pilot's pictures use in the menus, and its darker copy's.
 +static int menu_block(int pilot_id) {
-+    return PILOT_PORTRAIT_BASE + HAR_EXTENDED_STRIDE * ((pilot_id - PILOT_TRUMP) & 1);
++    return PILOT_PORTRAIT_BASE + HAR_EXTENDED_STRIDE * ((pilot_id - PILOT_JAGUAR) & 1);
 +}
 +
 +static int dim_block(int pilot_id) {
-+    return HAR_EXTENDED_BASE + 1 + PICTURE_COLORS * (pilot_id - PILOT_TRUMP);
++    return HAR_EXTENDED_BASE + 1 + PICTURE_COLORS * (pilot_id - PILOT_JAGUAR);
 +}
 +
 +// A surface with the picture's pixels as entries from `base` on.
@@ -1215,7 +1215,7 @@
 +}
 +
 +void pilot_pictures_load_colors(void) {
-+    for(int id = PILOT_TRUMP; id < NUMBER_OF_PILOT_TYPES; id++) {
++    for(int id = PILOT_JAGUAR; id < NUMBER_OF_PILOT_TYPES; id++) {
 +        const pilot_pictures *pics = pictures_get(id);
 +        if(!pics) {
 +            continue;
@@ -1230,7 +1230,7 @@
 +}
 +
 +void pilot_pictures_apply(animation *faces, animation *icons) {
-+    for(int id = PILOT_TRUMP; id < NUMBER_OF_PILOT_TYPES; id++) {
++    for(int id = PILOT_JAGUAR; id < NUMBER_OF_PILOT_TYPES; id++) {
 +        const pilot_pictures *pics = pictures_get(id);
 +        sprite *face = faces ? animation_get_sprite(faces, id) : NULL;
 +        sprite *icon = icons ? animation_get_sprite(icons, id) : NULL;
@@ -1245,7 +1245,7 @@
 +}
 +
 +void pilot_pictures_dim(surface *icon) {
-+    for(int id = PILOT_TRUMP; id < NUMBER_OF_PILOT_TYPES; id++) {
++    for(int id = PILOT_JAGUAR; id < NUMBER_OF_PILOT_TYPES; id++) {
 +        int from = menu_block(id), to = dim_block(id);
 +        for(int i = 0; i < icon->w * icon->h; i++) {
 +            if(icon->data[i] >= from && icon->data[i] < from + PICTURE_COLORS) {
@@ -1341,7 +1341,7 @@
 +// tournament photo: its colors go to the player's portrait entries. NULL if unavailable.
 +sprite *pilot_portrait_create(int pilot_id, int player);
 +
-+// The pilots the original game doesn't have (Trump, Musk) bring their pictures in their own
++// The pilots the original game doesn't have (Jaguar, Tiger) bring their pictures in their own
 +// colors (PILOTS.EXT). In the menus and the VS screen each has a block of 64 entries of the
 +// extended palette: the portrait entries, player 1's for the first and player 2's for the
 +// second (no menu needs them for a player then). The unselected icons' darker copies use
@@ -1392,21 +1392,21 @@
              pilot->color_2 = 1;
              pilot->color_3 = 15;
              break;
-+        case PILOT_TRUMP: // web build: navy, red and gold, like the suit and the tie
-+            pilot->power = 15;
-+            pilot->agility = 5;
-+            pilot->endurance = 10;
-+            pilot->color_1 = 5;
-+            pilot->color_2 = 1;
-+            pilot->color_3 = 4;
++        case PILOT_JAGUAR: // web build: a jaguar's coat, gold, black and sand (16: their own ramps)
++            pilot->power = 9;
++            pilot->agility = 14;
++            pilot->endurance = 7;
++            pilot->color_1 = 16;
++            pilot->color_2 = 16;
++            pilot->color_3 = 16;
 +            break;
-+        case PILOT_MUSK: // web build: graphite, silver and blue
-+            pilot->power = 8;
-+            pilot->agility = 13;
-+            pilot->endurance = 9;
-+            pilot->color_1 = 9;
-+            pilot->color_2 = 10;
-+            pilot->color_3 = 0;
++        case PILOT_TIGER: // web build: a tiger's coat, orange, black and white (16: their own ramps)
++            pilot->power = 14;
++            pilot->agility = 8;
++            pilot->endurance = 8;
++            pilot->color_1 = 16;
++            pilot->color_2 = 16;
++            pilot->color_3 = 16;
 +            break;
      }
  }

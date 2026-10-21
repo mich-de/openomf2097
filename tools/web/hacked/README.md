@@ -6,7 +6,7 @@ collected on X-BoT's OMF Universe (omf.niraj.ws, read through the Internet Archi
 adds them as robots of their own, on the robot grid's second page; the files are as their authors
 made them, renamed for the build's resources.
 
-## SUPERJAG: `FIGHTR12.AF`
+## SUPERJAG: `FIGHTR13.AF`
 
 "Навороченный Ягуар 2.0" (the souped-up Jaguar), © Илья (Ilya), 2000 (`hacked_jag.zip`, `jag2.af`).
 Jaguar with new secret moves; * wants an enhancement, which every robot has outside the tournament:
@@ -24,7 +24,7 @@ Jaguar with new secret moves; * wants an enhancement, which every robot has outs
 | Teleport (Chronos's) | Down, Down + Kick |
 | Suicide | Up, Up + Punch, after a lost fight |
 
-## SHADOW X: `FIGHTR13.AF`
+## SHADOW X: `FIGHTR14.AF`
 
 A hacked Shadow, author unknown (`hacked_shadow.zip`, `FIGHTR1.AF`, 1998). Some moves made simpler:
 

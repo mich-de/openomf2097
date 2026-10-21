@@ -102,10 +102,10 @@ grep -q "EXTRA_COLUMN" "$SRC/src/game/scenes/melee.c" || \
 grep -q "surface_upscale_pixelart" "$SRC/src/video/surface.h" || \
     git -C "$SRC" apply "$REPO/tools/web/hd-sprites.patch"
 
-# Two more pilots, Trump and Musk (pictures: tools/web/pilots); the pilots' faces in the
+# Two more pilots, Jaguar and Tiger (pictures: tools/web/pilots); the pilots' faces in the
 # arena in single player; rehit on by default; the select screen's icons for the extra
 # robots framed like the others; the GPU load following the frame rate. (After the above.)
-grep -q "PILOT_TRUMP" "$SRC/src/game/common_defines.h" || \
+grep -q "PILOT_JAGUAR" "$SRC/src/game/common_defines.h" || \
     git -C "$SRC" apply "$REPO/tools/web/web-extras.patch"
 
 # The World Championship's 35 pilots (WORLD.TRN) on three more pages of the pilot grid,
@@ -197,9 +197,23 @@ if [ ! -x "$OCELOT" ] || [ "$REPO/tools/web/ocelot/ocelot.c" -nt "$OCELOT" ]; th
         "$SRC"/src/utils/{str,path,vector,array,iterator,c_string_util,crash,list}.c "$B/logstub.c" \
         -I"$SRC/src" -w -lm -lpng -lz
 fi
-"$OCELOT" "$DATA/resources" "$REPO/tools/web/ocelot/art"
+"$OCELOT" "$DATA/resources" "$REPO/tools/web/ocelot/art" ocelot
 
-# Trump's and Musk's pictures: PILOTS.EXT, and their faces in MELEE.BK and VS.BK.
+# TIGRIS: Ocelot in a tiger's coat, FIGHTR12.AF and .X16 and its VS.BK portrait, from Ocelot's
+# art repainted by tools/web/tigris.
+TIGRIS=$B/tigris
+if [ ! -x "$TIGRIS" ] || [ "$REPO/tools/web/tigris/tigris.c" -nt "$TIGRIS" ]; then
+    gcc -O2 -o "$TIGRIS" "$REPO/tools/web/tigris/tigris.c" "$REPO/tools/web/ocelot/host_stubs.c" \
+        "$SRC"/src/formats/{af,altpal,bk,bkanim,animation,sprite,vga_image,rgba_image,pcx,move,palette,error}.c \
+        "$SRC"/src/formats/internal/*.c "$SRC"/src/video/vga_palette.c "$SRC"/src/video/vga_remap.c \
+        "$SRC"/src/utils/{str,path,vector,array,iterator,c_string_util,crash,list}.c "$B/logstub.c" \
+        -I"$SRC/src" -w -lm -lpng
+fi
+mkdir -p "$B/tigris-art"
+"$TIGRIS" "$DATA/resources" "$REPO/tools/web/ocelot/art" "$B/tigris-art"
+"$OCELOT" "$DATA/resources" "$B/tigris-art" tigris
+
+# Jaguar's and Tiger's pictures: PILOTS.EXT, and their faces in MELEE.BK and VS.BK.
 PILOTS=$B/pilots
 if [ ! -x "$PILOTS" ] || [ "$REPO/tools/web/pilots/pilots.c" -nt "$PILOTS" ]; then
     gcc -O1 -o "$PILOTS" "$REPO/tools/web/pilots/pilots.c" "$REPO/tools/web/ocelot/host_stubs.c" \
@@ -211,7 +225,7 @@ fi
 "$PILOTS" "$DATA/resources" "$REPO/tools/web/pilots/art"
 
 # The World Championship's pilots' faces and icons, from the tournament's photos (after the above:
-# their sprites follow Trump's and Musk's).
+# their sprites follow Jaguar's and Tiger's).
 TRNFACES=$B/trnfaces
 if [ ! -x "$TRNFACES" ] || [ "$REPO/tools/web/tournament/trnfaces.c" -nt "$TRNFACES" ]; then
     gcc -O1 -o "$TRNFACES" "$REPO/tools/web/tournament/trnfaces.c" "$REPO/tools/web/ocelot/host_stubs.c" \
@@ -223,7 +237,7 @@ fi
 "$TRNFACES" "$DATA/resources"
 
 # The players' hacked robots, SUPERJAG and SHADOW X (tools/web/hacked/README.md).
-cp "$REPO"/tools/web/hacked/FIGHTR12.AF "$REPO"/tools/web/hacked/FIGHTR13.AF "$DATA/resources/"
+cp "$REPO"/tools/web/hacked/FIGHTR13.AF "$REPO"/tools/web/hacked/FIGHTR14.AF "$DATA/resources/"
 
 # Fan-made tournaments, next to the original four (tools/web/tournaments/README.md).
 cp "$REPO"/tools/web/tournaments/*.TRN "$REPO"/tools/web/tournaments/*.PIC "$DATA/resources/"

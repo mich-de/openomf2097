@@ -1,8 +1,8 @@
-// Adds two pilots, TRUMP (11) and MUSK (12), to the game's select and VS screens:
+// Adds two pilots, JAGUAR (11) and TIGER (12), to the game's select and VS screens:
 //
 //   pilots <resources-dir> <art-dir>
 //
-// reads  MELEE.BK, VS.BK, <art-dir>/trump.png, <art-dir>/musk.png
+// reads  MELEE.BK, VS.BK, <art-dir>/jaguar.png, <art-dir>/tiger.png
 // writes PILOTS.EXT with their pictures in their own colors (see game/utils/har_extended.c),
 //        MELEE.BK with their grid icons (animation 3) and big faces (animation 4), and
 //        VS.BK with their big faces (animation 4), at sprite indices 11 and 12. In the BK
@@ -35,7 +35,7 @@
 #define ICON_W 51
 #define ICON_H 36
 
-static const char *pilot_art[] = {"trump", "musk"};
+static const char *pilot_art[] = {"jaguar", "tiger"};
 #define NEW_PILOTS 2
 
 typedef struct {
