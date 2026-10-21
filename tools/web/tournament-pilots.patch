@@ -158,14 +158,16 @@
  
 --- a/src/game/common_defines.h
 +++ b/src/game/common_defines.h
-@@ -99,10 +99,13 @@
+@@ -99,10 +99,16 @@
      PILOT_KREISSACK,
      PILOT_TRUMP, // web build: two more pilots, see game/utils/har_extended.c for their pictures
      PILOT_MUSK,
--    NUMBER_OF_PILOT_TYPES,
-+    // web build: the World Championship's pilots (WORLD.TRN), see game/utils/tournament_pilots.h
++    // web build: the World Championship's pilots (WORLD.TRN) who are not among the original ten,
++    // then the single player game's secret opponents; see game/utils/tournament_pilots.h
 +    PILOT_TOURNAMENT_FIRST,
-+    NUMBER_OF_PILOT_TYPES = PILOT_TOURNAMENT_FIRST + 35,
++    PILOT_FIRE = PILOT_TOURNAMENT_FIRST + 25,
++    PILOT_ICE,
+     NUMBER_OF_PILOT_TYPES,
      // The original game's playable pilots, 0..9: Major Kreissack is not a playable character
      NUMBER_OF_PLAYABLE_PILOT_TYPES = PILOT_KREISSACK,
  };
@@ -173,6 +175,44 @@
  
  enum
  {
+--- a/src/game/objects/har.c
++++ b/src/game/objects/har.c
+@@ -2841,6 +2841,12 @@
+ 
+     // Enable Electra Electricity & Pyros Fire palette tricks
+     object_add_animation_effects(obj, EFFECT_HAR_QUIRKS);
++#ifdef __EMSCRIPTEN__
++    // web build: Ice's Shadow is see-through, like the shadows it throws
++    if(pilot_id == PILOT_ICE) {
++        object_add_animation_effects(obj, EFFECT_SHADOW);
++    }
++#endif
+ 
+     af_move *move;
+     int extra_index;
+--- a/src/game/scenes/arena.c
++++ b/src/game/scenes/arena.c
+@@ -1777,6 +1777,20 @@
+         pal_index = rand_int(vector_size(&scene->bk_data->palettes));
+     }
+ 
++#ifdef __EMSCRIPTEN__
++    // web build: the Fire Pit burns for Fire and freezes for Ice, as when they come in single player
++    if(scene->id == SCENE_ARENA3 && scene->gs->init_flags->playback != 1) {
++        for(int i = 0; i < 2; i++) {
++            int pilot_id = game_state_get_player(scene->gs, i)->pilot->pilot_id;
++            if(pilot_id == PILOT_FIRE && pal_index == 0) {
++                pal_index = 1;
++            } else if(pilot_id == PILOT_ICE) {
++                pal_index = 2;
++            }
++        }
++    }
++#endif
++
+     // 0 is selected by default, so nothing to do if we hit that.
+     if(pal_index > 0 && pal_index < vector_size(&scene->bk_data->palettes)) {
+         vga_state_set_base_palette_from_range(bk_get_palette(scene->bk_data, pal_index), 0x60, 0x60, 0x40);
 --- a/src/game/scenes/melee.c
 +++ b/src/game/scenes/melee.c
 @@ -12,6 +12,7 @@
@@ -553,7 +593,7 @@
          }
      }
  }
-@@ -1124,6 +1221,22 @@
+@@ -1124,6 +1221,24 @@
      local->titles[0] = create_green_text(160, 6, lang_get(187)); // 'choose your pilot'
      local->titles[1] = create_green_text(160, 6, lang_get(186)); // 'choose your robot'
  
@@ -563,8 +603,10 @@
 +        if(player2->selectable) {
 +            snprintf(hint, sizeof(hint), "< PAGE %d OF %d >", page + 1, PILOT_PAGES);
 +        } else if(page == 0) {
-+            snprintf(hint, sizeof(hint), "< PAGE 1 OF %d >   %d TOURNAMENT PILOTS: LEFT/RIGHT", PILOT_PAGES,
++            snprintf(hint, sizeof(hint), "< PAGE 1 OF %d >   %d MORE PILOTS: LEFT/RIGHT", PILOT_PAGES,
 +                     TOURNAMENT_PILOTS);
++        } else if(page == PILOT_PAGES - 1) {
++            snprintf(hint, sizeof(hint), "< PAGE %d OF %d >   CHAMPIONSHIP, FIRE AND ICE", page + 1, PILOT_PAGES);
 +        } else {
 +            snprintf(hint, sizeof(hint), "< PAGE %d OF %d >   WORLD CHAMPIONSHIP PILOTS", page + 1, PILOT_PAGES);
 +        }
@@ -576,6 +618,18 @@
      // This is used to either show the selected HAR name or both in the "X VS. Y" format.
      local->har_title = create_black_text(320, 6, har_get_name(CURSOR_INDEX(local, 0)));
  
+--- a/src/game/scenes/vs.c
++++ b/src/game/scenes/vs.c
+@@ -683,6 +683,9 @@
+     } else if(is_spectator(scene->gs)) {
+         local->arena_name = create_arena_text(lang_get(56 + scene->gs->arena), (211 - 74), 6);
+         local->arena_desc = create_arena_text(lang_get(66 + scene->gs->arena), (211 - 74), 50);
++    } else if(player1->pilot->pilot_id == PILOT_FIRE || player1->pilot->pilot_id == PILOT_ICE) {
++        // web build: Fire and Ice fight in their Fire Pit
++        scene->gs->arena = SCENE_ARENA3 - SCENE_ARENA0;
+     } else {
+         // 1 player mode cycles through the arenas
+     }
 --- a/src/game/utils/har_extended.c
 +++ b/src/game/utils/har_extended.c
 @@ -355,6 +355,9 @@
@@ -625,11 +679,13 @@
  }
 --- /dev/null
 +++ b/src/game/utils/tournament_pilots.c
-@@ -0,0 +1,133 @@
+@@ -0,0 +1,207 @@
 +#include "game/utils/tournament_pilots.h"
++#include "formats/bk.h"
 +#include "formats/error.h"
 +#include "formats/pic.h"
 +#include "game/common_defines.h"
++#include "resources/languages.h"
 +#include "resources/resource_files.h"
 +#include "resources/trnmanager.h"
 +#include "utils/c_string_util.h"
@@ -640,10 +696,71 @@
 +
 +static sd_tournament_file world;
 +static int count = -1; // -1: not loaded yet
++static const sd_pilot *pilots[TOURNAMENT_PILOTS]; // NULL: no such pilot
++static sd_pilot secrets[2];                        // Fire and Ice
 +static char upper_names[TOURNAMENT_PILOTS][32];
 +static char bios[TOURNAMENT_PILOTS][128];
 +static int sexes[TOURNAMENT_PILOTS];
-+static vga_palette photo_palettes[TOURNAMENT_PILOTS]; // color 16: the robot in the photo's colors
++static vga_palette robot_palettes[TOURNAMENT_PILOTS]; // color 16: the robot in the colors drawn for it
++
++static bool same_name(const char *a, const char *b);
++
++// The original ten fight in the World Championship too; those are not pilots of their own.
++static bool is_original(const sd_pilot *p) {
++    for(int id = 0; id < NUMBER_OF_PLAYABLE_PILOT_TYPES; id++) {
++        if(same_name(str_c(&p->name), pilot_get_name(id))) {
++            return true;
++        }
++    }
++    return false;
++}
++
++// Fire and Ice, the single player game's secret opponents: no WORLD.TRN entry, no photo. They fight
++// as the World Championship's best, and their robots wear the colors the Fire Pit gives them when
++// they come: the fire of its second palette, the ice of its third's sky.
++static void add_secrets(const sd_pilot *best) {
++    sd_bk_file pit;
++    sd_bk_create(&pit);
++    const path filename = get_resource_filename("ARENA3.BK");
++    bool has_pit = sd_bk_load(&pit, &filename) == SD_SUCCESS && pit.palettes[1] && pit.palettes[2];
++    static const struct {
++        int name_str; // the language file's name
++        int har_id;
++        int sex;
++        const char *quote;
++        const char *bio;
++    } secret[2] = {
++        {189, HAR_KATANA, PILOT_SEX_MALE, "Few reach the fire. Fewer walk out of it.",
++         "The Fire Pit's secret challenger. Its Katana is painted in flames and has every upgrade."},
++        {190, HAR_SHADOW, PILOT_SEX_FEMALE, "After the fire, the ice.",
++         "The last secret of the Fire Pit. Its Shadow is as clear as ice and has every upgrade."},
++    };
++    for(int i = 0; i < 2; i++) {
++        int n = PILOT_FIRE + i - PILOT_TOURNAMENT_FIRST;
++        sd_pilot *p = &secrets[i];
++        sd_pilot_clone(p, best);
++        char name[32]; // "FIRE" as "Fire"
++        snprintf(name, sizeof(name), "%s", lang_get(secret[i].name_str));
++        for(char *c = name + 1; *c; c++) {
++            *c = tolower((unsigned char)*c);
++        }
++        str_set_c(&p->name, name);
++        str_set_c(&p->quotes[0], secret[i].quote);
++        p->har_id = secret[i].har_id;
++        p->power = p->agility = p->endurance = 30; // the top of the select screen's scale
++        p->secret = 1;
++        snprintf(upper_names[n], sizeof(upper_names[n]), "%s", lang_get(secret[i].name_str));
++        snprintf(bios[n], sizeof(bios[n]), "%s", secret[i].bio);
++        sexes[n] = secret[i].sex;
++        if(has_pit) {
++            for(int k = 0; k < 48; k++) {
++                robot_palettes[n].colors[k] = i == 0 ? pit.palettes[1]->colors[k] : pit.palettes[2]->colors[48 + k % 16];
++            }
++        }
++        pilots[n] = p;
++    }
++    sd_bk_free(&pit);
++}
 +
 +static void load(void) {
 +    if(count >= 0) {
@@ -653,7 +770,6 @@
 +    if(trn_load(&world, "WORLD.TRN") != 0) {
 +        return;
 +    }
-+    count = world.enemy_count < TOURNAMENT_PILOTS ? world.enemy_count : TOURNAMENT_PILOTS;
 +
 +    // female or male: the photo says
 +    sd_pic_file pic;
@@ -662,8 +778,16 @@
 +    bool has_pic = sd_pic_load(&pic, &filename) == SD_SUCCESS;
 +
 +    int rank = 0;
-+    for(int n = 0; n < count; n++) {
-+        const sd_pilot *p = world.enemies[n];
++    for(int e = 0; e < world.enemy_count && count < PILOT_FIRE - PILOT_TOURNAMENT_FIRST; e++) {
++        const sd_pilot *p = world.enemies[e];
++        if(!p->secret) {
++            rank++;
++        }
++        if(is_original(p)) {
++            continue;
++        }
++        int n = count++;
++        pilots[n] = p;
 +        snprintf(upper_names[n], sizeof(upper_names[n]), "%s", str_c(&p->name));
 +        for(char *c = upper_names[n]; *c; c++) {
 +            *c = toupper((unsigned char)*c);
@@ -671,30 +795,34 @@
 +        const sd_pic_photo *photo = has_pic ? sd_pic_get(&pic, p->photo_id) : NULL;
 +        sexes[n] = photo && photo->sex ? PILOT_SEX_FEMALE : PILOT_SEX_MALE;
 +        if(photo) {
-+            photo_palettes[n] = photo->pal;
++            robot_palettes[n] = photo->pal;
 +        }
 +        const char *robot = p->har_id < NUMBER_OF_HAR_TYPES ? har_get_name(p->har_id) : "any";
 +        if(p->secret) {
 +            snprintf(bios[n], sizeof(bios[n]), "A secret challenger of the World Championship. Robot: %s.", robot);
 +        } else {
-+            snprintf(bios[n], sizeof(bios[n]), "World Championship, ranked %d. Robot: %s.", ++rank, robot);
++            snprintf(bios[n], sizeof(bios[n]), "World Championship, ranked %d. Robot: %s.", rank, robot);
 +        }
 +    }
 +    if(has_pic) {
 +        sd_pic_free(&pic);
 +    }
-+    log_info("Tournament pilots: %d from WORLD.TRN", count);
++    if(world.enemy_count > 0) {
++        add_secrets(world.enemies[0]); // the world champion
++    }
++    count = TOURNAMENT_PILOTS;
++    log_info("Tournament pilots: %d from WORLD.TRN, Fire and Ice", PILOT_FIRE - PILOT_TOURNAMENT_FIRST);
 +}
 +
 +static int index_of(int pilot_id) {
 +    load();
 +    int n = pilot_id - PILOT_TOURNAMENT_FIRST;
-+    return n >= 0 && n < count ? n : -1;
++    return n >= 0 && n < count && pilots[n] ? n : -1;
 +}
 +
 +const sd_pilot *tournament_pilot_get(int pilot_id) {
 +    int n = index_of(pilot_id);
-+    return n < 0 ? NULL : world.enemies[n];
++    return n < 0 ? NULL : pilots[n];
 +}
 +
 +const char *tournament_pilot_upper_name(int pilot_id) {
@@ -732,7 +860,7 @@
 +
 +const char *tournament_pilot_quote_by_name(const char *name) {
 +    load();
-+    for(int n = 0; n < count; n++) {
++    for(int n = 0; count > 0 && n < world.enemy_count; n++) {
 +        if(same_name(str_c(&world.enemies[n]->name), name) && str_size(&world.enemies[n]->quotes[0]) > 0) {
 +            return str_c(&world.enemies[n]->quotes[0]);
 +        }
@@ -757,21 +885,23 @@
 +            pilot->color_1 = color;
 +            break;
 +    }
-+    memcpy(&pilot->palette.colors[index * 0x10], &photo_palettes[n].colors[index * 0x10], 0x10 * sizeof(vga_color));
++    memcpy(&pilot->palette.colors[index * 0x10], &robot_palettes[n].colors[index * 0x10], 0x10 * sizeof(vga_color));
 +}
 --- /dev/null
 +++ b/src/game/utils/tournament_pilots.h
-@@ -0,0 +1,26 @@
+@@ -0,0 +1,29 @@
 +#ifndef TOURNAMENT_PILOTS_H
 +#define TOURNAMENT_PILOTS_H
 +
 +#include "formats/pilot.h"
 +
-+// Web build: the World Championship's pilots (WORLD.TRN), playable in one and two player
-+// games as pilot ids PILOT_TOURNAMENT_FIRST and up, in the tournament's order. Their faces
-+// and icons are in MELEE.BK and VS.BK at those ids (tools/web/tournament/trnfaces.c).
++// Web build: the World Championship's pilots (WORLD.TRN) but the original ten, then Fire and Ice,
++// playable in one and two player games as pilot ids PILOT_TOURNAMENT_FIRST and up, in the
++// tournament's order. Their faces and icons are in MELEE.BK and VS.BK at those ids
++// (tools/web/tournament/trnfaces.c).
 +
-+// The pilot as WORLD.TRN has it; NULL for the other pilots (or without WORLD.TRN).
++// The pilot as WORLD.TRN has it (Fire and Ice: as the world champion, with their own name, robot and
++// stats); NULL for the other pilots (or without WORLD.TRN).
 +const sd_pilot *tournament_pilot_get(int pilot_id);
 +
 +// Name as the score board spells it, bio for the select screen, and female or male.
@@ -784,7 +914,8 @@
 +const char *tournament_pilot_quote_by_name(const char *name);
 +
 +// A player color as sd_pilot_set_player_color() sets it, except that 16 takes the tournament
-+// pilot's own colors (from its photo in WORLD.PIC, as the tournament does).
++// pilot's own colors (from its photo in WORLD.PIC, as the tournament does; Fire's and Ice's from
++// the Fire Pit's palettes).
 +void tournament_pilot_set_player_color(sd_pilot *pilot, int pilot_id, player_color index, uint8_t color);
 +
 +#endif // TOURNAMENT_PILOTS_H
