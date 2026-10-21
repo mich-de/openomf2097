@@ -19,10 +19,15 @@
 // Sprites without art (body pieces) keep Jaguar's pixels, mapped through Milano's
 // colors onto Ocelot's palette. The concussion cannon becomes a fire spit.
 //
+// TIGRIS has powers of its own, given as SHADOW X's and SUPERJAG's makers gave theirs: new
+// animation strings for the same frames. Its spit comes three at a time, its leap cannot be hit
+// in the air, and down, down + punch is a new move, three claw swipes.
+//
 // Palette notes (indices 160..249 are shared by every arena, MELEE.BK and VS.BK):
 //   1..47     Jaguar's HAR colors (P2 is drawn +48), 32..47 its plating
 //   257..575  Ocelot's own colors (16-bit pixels; P2's are drawn +384)
 //   176..183 red, 240..243 orange to yellow, 207 pale yellow, 223 white: the fire
+#define _GNU_SOURCE // memmem
 #include <math.h>
 #include <png.h>
 #include <zlib.h>
@@ -56,6 +61,14 @@
 #define MOVE_SHOT 38       // its projectile
 #define MOVE_SHOT_HIT 37   // the projectile's impact
 #define VS_HAR_PORTRAITS 5 // VS.BK animation holding one big portrait per HAR
+
+// TIGRIS's powers, made the way the players hacked Shadow and Jaguar: new animation strings
+// for Jaguar's own sprites.
+#define MOVE_LEAP 15      // the Jaguar Leap: down, down-forward, forward + punch (and 17, the same keys)
+#define MOVE_LEAP_TOO 17
+#define MOVE_JAB 42       // a standing punch, the claws' frames
+#define MOVE_CLAWS 29     // a free slot before the basic moves, which would take the keys first
+#define CLAWS_KEYS "P252" // down, down + punch (the keys read backwards)
 
 // The robot being built: OCELOT (11, spotted) or TIGRIS (12, striped).
 static int robot_id;
@@ -638,6 +651,63 @@ static int frame_of_spawn(const sd_animation *ani) {
     return 0;
 }
 
+// --- TIGRIS's powers -----------------------------------------------------------------
+
+// A move's string, the same with every upgrade and pilot (no variants to pick from).
+static void set_anim(sd_move *move, const char *anim) {
+    str_set_c(&move->animation->anim_string, anim);
+    move->extra_string_selector = 0; // ESS_NONE
+    vector_clear(&move->animation->extra_strings);
+}
+
+// The tiger's claws: three swipes, each one a hit (q1..q3 let the move hit again), on the
+// keys no Jaguar move takes.
+static void add_claws(sd_af_file *af) {
+    sd_move claws;
+    sd_move_create(&claws);
+    sd_move_copy(&claws, sd_af_get_move(af, MOVE_JAB));
+    str_set_c(&claws.move_string, CLAWS_KEYS);
+    claws.damage_amount = 12;
+    set_anim(&claws, "A1-sp7sf10l20s5B1-C1-cpq1D2-nC1-sp7sf10l20s5B1-cpq2D2-nC1-sp7sf10l20s5B1-cpq3D2-nC1-"
+                     "njhB2-njhA1");
+    sd_af_set_move(af, MOVE_CLAWS, &claws);
+    sd_move_free(&claws);
+}
+
+// The pounce: invulnerable all the way through the air, and harder.
+static void leap_untouchable(sd_move *move) {
+    const char *src = str_c(&move->animation->anim_string);
+    char out[1024] = "";
+    const char *seg = src;
+    while(*seg) {
+        size_t n = strcspn(seg, "-");
+        bool flying = memmem(seg, n, "hx", 2) || memmem(seg, n, "vx", 2);
+        size_t len = strlen(out);
+        snprintf(out + len, sizeof(out) - len, "%s%s%.*s", len ? "-" : "",
+                 flying && !memmem(seg, n, "zz", 2) ? "zz" : "", (int)n, seg);
+        seg += n + (seg[n] == '-');
+    }
+    set_anim(move, out);
+    move->damage_amount = 40;
+}
+
+// The roar: three fire spits from the mouth, a little apart, then a longer wait for the next.
+static int triple_spit(sd_move *cannon, sd_move *shot) {
+    int x, y;
+    const char *at = strstr(str_c(&cannon->animation->anim_string), "mx");
+    if(!at || sscanf(at, "mx%dmy%d", &x, &y) != 2) {
+        return 1;
+    }
+    char anim[512];
+    snprintf(anim, sizeof(anim),
+             "nA2-nB1-nC1-cpD2-mx%+dmy%+dm38mp13mn20D1-E4-mx%+dmy%+dm38mp13mn20D1-E4-mx%+dmy%+dm38mp13mn20D1-E5-"
+             "mm21mu30jhnD4-jhC4",
+             x, y, x, y - 10, x, y + 8);
+    set_anim(cannon, anim);
+    shot->damage_amount = 18; // three of them
+    return 0;
+}
+
 // --- the robot ----------------------------------------------------------------------
 
 static bool is_fire(int m) {
@@ -669,6 +739,9 @@ static int make_ocelot(const char *dir, const char *art_dir) {
         return 1;
     }
     af.fighter_id = robot_id;
+    if(striped) {
+        add_claws(&af);
+    }
 
     // the art, and its colors
     art_frame *art[70][32] = {{NULL}};
@@ -706,6 +779,9 @@ static int make_ocelot(const char *dir, const char *art_dir) {
     if(!frames) {
         fprintf(stderr, "no art in %s\n", art_dir);
         return 1;
+    }
+    if(striped) {
+        memcpy(art[MOVE_CLAWS], art[MOVE_JAB], sizeof(art[MOVE_JAB])); // the claws are the jab's frames
     }
     build_palette(&colors);
     printf("%d frames of art, %d colors: %d in the robot's palette", frames, colors.n, ocelot_count);
@@ -787,6 +863,16 @@ static int make_ocelot(const char *dir, const char *art_dir) {
             }
             printf("fire spit leaves the mouth at %+d,%+d\n", mx, my);
         }
+    }
+
+    if(striped) {
+        leap_untouchable(sd_af_get_move(&af, MOVE_LEAP));
+        leap_untouchable(sd_af_get_move(&af, MOVE_LEAP_TOO));
+        if(triple_spit(sd_af_get_move(&af, MOVE_CANNON), sd_af_get_move(&af, MOVE_SHOT))) {
+            fprintf(stderr, "no spawn point in the cannon's animation\n");
+            return 1;
+        }
+        printf("TIGRIS: triple spit, untouchable leap, claws on %s\n", CLAWS_KEYS);
     }
 
     snprintf(fn, sizeof(fn), "%s/FIGHTR%d.AF", dir, robot_id);
