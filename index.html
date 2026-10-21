@@ -107,9 +107,11 @@
   }
   @media (prefers-reduced-motion: reduce) { #launcher { transition: none; } }
 
-  /* The game draws into this canvas, scaled by CSS, pixelated. */
-  #stage-game { position: fixed; inset: 0; display: none; background: #000; }
-  #stage-game.on { display: block; }
+  /* The game draws into this canvas at the screen's real pixels: the engine sizes its
+     drawing buffer from this CSS box (SDL resizable + high DPI), so the stage must have its
+     size even while it is still hidden behind the launcher. */
+  #stage-game { position: fixed; inset: 0; visibility: hidden; background: #000; }
+  #stage-game.on { visibility: visible; }
   #canvas {
     position: absolute; inset: 0; margin: auto;
     width: 100%; height: 100%; object-fit: contain;
@@ -203,6 +205,10 @@
 
     const Module = {
       canvas: $("canvas"),
+      // How hard the GPU works: the framebuffer scale and the robots' sprite detail,
+      // picked for this device (see quality()) and lowered while playing if it can't keep up.
+      omfMaxScale: quality().maxScale,
+      omfSpriteScale: quality().spriteScale,
       // Read-only game data at /, saved scores and config in /state.
       ENV: { OPENOMF_RESOURCE_PATH: "/", OPENOMF_STATE_PATH: "/", OPENOMF_CONFIG_PATH: "/" },
       locateFile: (p) => "wasm/" + p + v,
@@ -227,7 +233,37 @@
     s.onerror = () => status("COULD NOT LOAD wasm/openomf.js");
     document.body.appendChild(s);
 
+    // Watch the frame rate while playing: below 40 fps for 8 seconds running, draw lighter.
+    // The engine re-reads omfMaxScale every second; sprite detail follows on the next load.
+    const watchFrameRate = () => {
+      let last = performance.now(), frames = 0, slow = 0, from = last;
+      const step = (now) => {
+        if (now - last < 1000) {
+          frames++;
+        } else { // a hidden tab pauses frames: start measuring again
+          from = now;
+          frames = 0;
+        }
+        last = now;
+        if (now - from >= 4000) {
+          const fps = frames * 1000 / (now - from);
+          slow = fps < 40 ? slow + 1 : 0;
+          if (slow >= 2 && Module.omfMaxScale > 1) {
+            Module.omfMaxScale -= 1;
+            Module.omfSpriteScale = Module.omfMaxScale >= 4 ? 4 : Module.omfMaxScale >= 2 ? 2 : 1;
+            try { localStorage.setItem("omf-max-scale", Module.omfMaxScale); } catch (e) { /* no storage */ }
+            slow = -1; // give the lighter setting a window to settle
+          }
+          from = now;
+          frames = 0;
+        }
+        requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    };
+
     const on = () => {
+      setTimeout(watchFrameRate, 8000); // loading the first scene is not a frame rate
       $("launcher").classList.add("off");
       $("stage-game").classList.add("on");
       $("tools").hidden = false;
@@ -289,6 +325,38 @@
   const touchQuery = new URLSearchParams(location.search).get("touch");
   const touch = touchQuery !== null ? touchQuery !== "0" : matchMedia("(pointer: coarse)").matches;
   const touchEl = $("touch");
+
+  // The device's quality level, from what the browser tells about it. Software rendering,
+  // few cores or little memory, and phones and tablets get a lighter load; a lower level a
+  // previous session settled on is kept. ?quality=low|mid|high forces one.
+  let chosenQuality = null;
+  function quality() {
+    if (chosenQuality) return chosenQuality;
+    const levels = { low: { maxScale: 2, spriteScale: 1 }, mid: { maxScale: 3, spriteScale: 2 },
+                     high: { maxScale: 6, spriteScale: 4 } };
+    let name = new URLSearchParams(location.search).get("quality");
+    if (!levels[name]) {
+      let renderer = "";
+      try {
+        const gl = document.createElement("canvas").getContext("webgl2");
+        const info = gl && gl.getExtension("WEBGL_debug_renderer_info");
+        renderer = gl ? String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER)) : "none";
+      } catch (e) { renderer = "none"; }
+      const cores = navigator.hardwareConcurrency || 4, memory = navigator.deviceMemory || 8;
+      if (renderer === "none" || /swiftshader|llvmpipe|softpipe|software|basic render/i.test(renderer)) name = "low";
+      else if (touch || cores <= 4 || memory <= 4) name = "mid";
+      else name = "high";
+    }
+    chosenQuality = { ...levels[name] };
+    try {
+      const saved = parseInt(localStorage.getItem("omf-max-scale"), 10);
+      if (saved > 0 && saved < chosenQuality.maxScale && !new URLSearchParams(location.search).get("quality")) {
+        chosenQuality.maxScale = saved;
+        chosenQuality.spriteScale = saved >= 4 ? 4 : saved >= 2 ? 2 : 1;
+      }
+    } catch (e) { /* no storage */ }
+    return chosenQuality;
+  }
   const padCv = $("pad"), escCv = $("esc"), punchCv = $("punch"), kickCv = $("kick");
   const held = new Set();
 
@@ -415,21 +483,36 @@
     padCv.addEventListener("pointercancel", end);
   }
 
+  // A quick tap must still reach the game: it reads the keys once per frame, so a press and
+  // release inside one (slow) frame would be lost. Keep the key down for at least this long.
+  // A tap right after another needs the key up for a moment in between, or it reads as one press.
+  const MIN_PRESS_MS = 80, MIN_GAP_MS = 40;
   function bindButton(cv, key, draw) {
-    let pid = null;
+    let pid = null, downAt = 0, release = 0, press = 0;
+    const down = () => { press = 0; downAt = performance.now(); keyDown(key); };
     const end = (e) => {
       if (e.pointerId !== pid) return;
       pid = null;
-      keyUp(key);
       draw(false);
+      // a press still waiting for its gap has not reached the game yet: release after it
+      const wait = press ? MIN_GAP_MS + MIN_PRESS_MS : MIN_PRESS_MS - (performance.now() - downAt);
+      release = setTimeout(() => { release = 0; keyUp(key); }, Math.max(0, wait));
     };
     cv.addEventListener("pointerdown", (e) => {
       e.preventDefault();
       if (pid !== null) return;
       pid = e.pointerId;
       cv.setPointerCapture(pid);
-      keyDown(key);
       draw(true);
+      clearTimeout(press);
+      if (release) { // the last tap is still held down: let it go first
+        clearTimeout(release);
+        release = 0;
+        keyUp(key);
+        press = setTimeout(down, MIN_GAP_MS);
+      } else {
+        down();
+      }
     });
     cv.addEventListener("pointerup", end);
     cv.addEventListener("pointercancel", end);

@@ -74,6 +74,40 @@ grep -q "Web build: stdin never receives data" "$SRC/src/console/console.c" || \
 grep -q "table 3.13" "$SRC/src/video/renderers/opengl3/helpers/render_target.c" || \
     git -C "$SRC" apply "$REPO/tools/web/rgba16f-patch.patch"
 
+# ...and WebGL2 reads that float FBO back only as RGBA/FLOAT: the match photo
+# for the newsroom (har_screencaps_capture) otherwise comes back empty.
+grep -q "reads a float color buffer" "$SRC/src/video/renderers/opengl3/gl3_renderer.c" || \
+    git -C "$SRC" apply "$REPO/tools/web/readpixels-float.patch"
+
+# Full HD and beyond: the canvas takes the screen's real pixels (SDL resizable + high
+# DPI, sized by the page's CSS) and the game draws into a framebuffer about as tall,
+# re-fitted whenever the page resizes it. (Applied after the sdl_window.c seds above.)
+grep -q "web_fit_video" "$SRC/src/engine.c" || \
+    git -C "$SRC" apply "$REPO/tools/web/web-hd.patch"
+
+# OCELOT, a twelfth robot: Jaguar with a jaguar's coat, a tail and a fire spit.
+# The engine learns about HAR 11 here; its art is generated below (tools/web/ocelot).
+grep -q "HAR_OCELOT" "$SRC/src/game/common_defines.h" || \
+    git -C "$SRC" apply "$REPO/tools/web/har-ocelot.patch"
+
+# A sixth column on the robot select screen: Nova on top, Ocelot below.
+# MELEE.BK only has art for ten robots, so the grid is re-cut from the
+# background and the two portraits come from their idle animations.
+grep -q "EXTRA_COLUMN" "$SRC/src/game/scenes/melee.c" || \
+    git -C "$SRC" apply "$REPO/tools/web/melee-sixth-column.patch"
+
+# HD sprites: robots drawn up to 4x finer than the game's pixels (Scale2x when they load,
+# or the art's own detail), still moving and colliding at the game's size; a larger
+# texture atlas that starts over when full. (Applied after the two patches above.)
+grep -q "surface_upscale_pixelart" "$SRC/src/video/surface.h" || \
+    git -C "$SRC" apply "$REPO/tools/web/hd-sprites.patch"
+
+# Two more pilots, Trump and Musk (pictures: tools/web/pilots); the pilots' faces in the
+# arena in single player; rehit on by default; the select screen's icons for the extra
+# robots framed like the others; the GPU load following the frame rate. (After the above.)
+grep -q "PILOT_TRUMP" "$SRC/src/game/common_defines.h" || \
+    git -C "$SRC" apply "$REPO/tools/web/web-extras.patch"
+
 # --- epoxy shim (libepoxy stand-in) -------------------------------------------
 mkdir -p "$B/shim"
 emcc -O2 -I"$SHIM" -c "$SHIM/epoxy_shim.c" -o "$B/shim/epoxy_shim.o"
@@ -148,6 +182,29 @@ STUB
         "$SRC/src/vendored/argtable/argtable3.c" "$B/logstub.c" \
         -I"$SRC/src" -I"$SRC/src/vendored/argtable" -w -lm
 fi
+# Ocelot: FIGHTR11.AF from Jaguar's file and the hand-drawn frames in
+# tools/web/ocelot/art, its own colors (OCELOT.GPL) and its VS.BK portrait.
+OCELOT=$B/ocelot
+if [ ! -x "$OCELOT" ] || [ "$REPO/tools/web/ocelot/ocelot.c" -nt "$OCELOT" ]; then
+    gcc -O1 -o "$OCELOT" "$REPO/tools/web/ocelot/ocelot.c" "$REPO/tools/web/ocelot/host_stubs.c" \
+        "$SRC"/src/formats/{af,altpal,bk,bkanim,animation,sprite,vga_image,rgba_image,pcx,move,palette,error}.c \
+        "$SRC"/src/formats/internal/*.c "$SRC"/src/video/vga_palette.c "$SRC"/src/video/vga_remap.c \
+        "$SRC"/src/utils/{str,path,vector,array,iterator,c_string_util,crash,list}.c "$B/logstub.c" \
+        -I"$SRC/src" -w -lm -lpng -lz
+fi
+"$OCELOT" "$DATA/resources" "$REPO/tools/web/ocelot/art"
+
+# Trump's and Musk's pictures: PILOTS.EXT, and their faces in MELEE.BK and VS.BK.
+PILOTS=$B/pilots
+if [ ! -x "$PILOTS" ] || [ "$REPO/tools/web/pilots/pilots.c" -nt "$PILOTS" ]; then
+    gcc -O1 -o "$PILOTS" "$REPO/tools/web/pilots/pilots.c" "$REPO/tools/web/ocelot/host_stubs.c" \
+        "$SRC"/src/formats/{af,altpal,bk,bkanim,animation,sprite,vga_image,rgba_image,pcx,move,palette,error}.c \
+        "$SRC"/src/formats/internal/*.c "$SRC"/src/video/vga_palette.c "$SRC"/src/video/vga_remap.c \
+        "$SRC"/src/utils/{str,path,vector,array,iterator,c_string_util,crash,list}.c "$B/logstub.c" \
+        -I"$SRC/src" -w -lm -lpng
+fi
+"$PILOTS" "$DATA/resources" "$REPO/tools/web/pilots/art"
+
 for L in ENGLISH GERMAN; do
     "$LT" -i "$SRC/resources/${L}2.TXT" -o "$DATA/resources/${L}.DAT2" --check-count 1
 done
