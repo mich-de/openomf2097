@@ -108,6 +108,11 @@ grep -q "surface_upscale_pixelart" "$SRC/src/video/surface.h" || \
 grep -q "PILOT_TRUMP" "$SRC/src/game/common_defines.h" || \
     git -C "$SRC" apply "$REPO/tools/web/web-extras.patch"
 
+# The World Championship's 35 pilots (WORLD.TRN) on three more pages of the pilot grid,
+# playable in one and two player games; their pictures: tools/web/tournament. (After the above.)
+grep -q "PILOT_TOURNAMENT_FIRST" "$SRC/src/game/common_defines.h" || \
+    git -C "$SRC" apply "$REPO/tools/web/tournament-pilots.patch"
+
 # --- epoxy shim (libepoxy stand-in) -------------------------------------------
 mkdir -p "$B/shim"
 emcc -O2 -I"$SHIM" -c "$SHIM/epoxy_shim.c" -o "$B/shim/epoxy_shim.o"
@@ -204,6 +209,18 @@ if [ ! -x "$PILOTS" ] || [ "$REPO/tools/web/pilots/pilots.c" -nt "$PILOTS" ]; th
         -I"$SRC/src" -w -lm -lpng
 fi
 "$PILOTS" "$DATA/resources" "$REPO/tools/web/pilots/art"
+
+# The World Championship's pilots' faces and icons, from the tournament's photos (after the above:
+# their sprites follow Trump's and Musk's).
+TRNFACES=$B/trnfaces
+if [ ! -x "$TRNFACES" ] || [ "$REPO/tools/web/tournament/trnfaces.c" -nt "$TRNFACES" ]; then
+    gcc -O1 -o "$TRNFACES" "$REPO/tools/web/tournament/trnfaces.c" "$REPO/tools/web/ocelot/host_stubs.c" \
+        "$SRC"/src/formats/{af,altpal,bk,bkanim,animation,sprite,vga_image,rgba_image,pcx,move,palette,error,tournament,pilot,pic}.c \
+        "$SRC"/src/formats/internal/*.c "$SRC"/src/video/vga_palette.c "$SRC"/src/video/vga_remap.c \
+        "$SRC"/src/utils/{str,path,vector,array,iterator,c_string_util,crash,list}.c "$B/logstub.c" \
+        -I"$SRC/src" -w -lm -lpng
+fi
+"$TRNFACES" "$DATA/resources"
 
 for L in ENGLISH GERMAN; do
     "$LT" -i "$SRC/resources/${L}2.TXT" -o "$DATA/resources/${L}.DAT2" --check-count 1

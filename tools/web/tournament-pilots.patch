@@ -1,0 +1,789 @@
+--- a/src/controller/ai_controller.c
++++ b/src/controller/ai_controller.c
+@@ -1,4 +1,5 @@
+ #include "controller/ai_controller.h"
++#include "game/utils/tournament_pilots.h"
+ #include "controller/controller.h"
+ #include "formats/pilot.h"
+ #include "game/game_state.h"
+@@ -1054,6 +1055,31 @@
+             pilot->learning = 4.0f;
+             pilot->forget = 0.1f;
+             break;
++        default: {
++            // web build: a World Championship pilot fights as in the tournament
++            const sd_pilot *p = tournament_pilot_get(pilot->pilot_id);
++            if(p == NULL) {
++                break;
++            }
++            pilot->att_normal = p->att_normal;
++            pilot->att_hyper = p->att_hyper;
++            pilot->att_jump = p->att_jump;
++            pilot->att_def = p->att_def;
++            pilot->att_sniper = p->att_sniper;
++            pilot->ap_close = p->ap_close;
++            pilot->ap_throw = p->ap_throw;
++            pilot->ap_special = p->ap_special;
++            pilot->ap_jump = p->ap_jump;
++            pilot->ap_high = p->ap_high;
++            pilot->ap_low = p->ap_low;
++            pilot->ap_middle = p->ap_middle;
++            pilot->pref_jump = p->pref_jump;
++            pilot->pref_fwd = p->pref_fwd;
++            pilot->pref_back = p->pref_back;
++            pilot->learning = p->learning;
++            pilot->forget = p->forget;
++            break;
++        }
+     }
+ }
+ 
+--- a/src/game/common_defines.c
++++ b/src/game/common_defines.c
+@@ -1,4 +1,5 @@
+ #include "game/common_defines.h"
++#include "game/utils/tournament_pilots.h"
+ #include "resources/ids.h"
+ #include "resources/languages.h"
+ #include "utils/c_array_util.h"
+@@ -6,6 +7,7 @@
+ #include "utils/random.h"
+ #include "utils/str.h"
+ #include <stddef.h>
++#include <stdio.h>
+ #include <string.h>
+ 
+ const char *ai_difficulty_names[] = {
+@@ -90,20 +92,46 @@
+     },
+ };
+ #define EXTRA_PILOT(id) (&extra_pilots[(id) - PILOT_TRUMP])
++#define IS_EXTRA_PILOT(id) ((id) >= PILOT_TRUMP && (id) < PILOT_TOURNAMENT_FIRST)
++#define IS_TOURNAMENT_PILOT(id) ((id) >= PILOT_TOURNAMENT_FIRST && (id) < NUMBER_OF_PILOT_TYPES)
++
++// A tournament pilot's quote, or "" if WORLD.TRN has none.
++static const char *tournament_quote(unsigned int id) {
++    const sd_pilot *p = tournament_pilot_get(id);
++    return p ? str_c(&p->quotes[0]) : "";
++}
+ 
+ const char *pilot_get_lang_name(unsigned int id) {
+-    return id >= PILOT_TRUMP && id < NUMBER_OF_PILOT_TYPES ? EXTRA_PILOT(id)->name : lang_get(20 + id);
++    if(IS_TOURNAMENT_PILOT(id)) {
++        const sd_pilot *p = tournament_pilot_get(id);
++        return p ? str_c(&p->name) : "";
++    }
++    return IS_EXTRA_PILOT(id) ? EXTRA_PILOT(id)->name : lang_get(20 + id);
+ }
+ 
+ const char *pilot_get_lang_bio(unsigned int id) {
+-    return id >= PILOT_TRUMP && id < NUMBER_OF_PILOT_TYPES ? EXTRA_PILOT(id)->bio : lang_get(135 + id);
++    if(IS_TOURNAMENT_PILOT(id)) {
++        return tournament_pilot_bio(id);
++    }
++    return IS_EXTRA_PILOT(id) ? EXTRA_PILOT(id)->bio : lang_get(135 + id);
+ }
+ 
+ // What the speaker says to the target in the VS screen: the opening line, or the reply.
+ const char *pilot_get_vs_line(unsigned int speaker, unsigned int target, bool reply) {
++    if(IS_TOURNAMENT_PILOT(speaker)) {
++        return tournament_quote(speaker);
++    }
+     if(speaker >= PILOT_TRUMP) {
+         return EXTRA_PILOT(speaker)->says[reply];
+     }
++    if(IS_TOURNAMENT_PILOT(target)) {
++        // what the speaker says in the World Championship, where the original pilots fight too
++        const char *quote = tournament_pilot_quote_by_name(pilot_get_lang_name(speaker));
++        if(quote) {
++            return quote;
++        }
++        return reply ? "The champion of the world. We'll see." : "So you are the champion they talk about. Prove it.";
++    }
+     if(target >= PILOT_TRUMP) {
+         return EXTRA_PILOT(target)->taunted[reply];
+     }
+@@ -112,7 +140,21 @@
+ 
+ // The ending texts: part 1 with the pilot's face, part 2 after it.
+ const char *pilot_get_ending_text(unsigned int id, int part) {
+-    if(id >= PILOT_TRUMP && id < NUMBER_OF_PILOT_TYPES) {
++    if(IS_TOURNAMENT_PILOT(id)) {
++        static char text[256];
++        if(part == 1) {
++            snprintf(text, sizeof(text),
++                     "With Major Kreissack defeated, %s is the undisputed champion of the W.A.R. arena.",
++                     pilot_get_lang_name(id));
++        } else {
++            snprintf(text, sizeof(text),
++                     "The World Championship has a new name to beat: %s. The next challengers are already "
++                     "lining up.",
++                     pilot_get_lang_name(id));
++        }
++        return text;
++    }
++    if(IS_EXTRA_PILOT(id)) {
+         return EXTRA_PILOT(id)->ending[part == 1 ? 0 : 1];
+     }
+     return lang_get((part == 1 ? 993 : 1003) + id);
+@@ -121,7 +163,7 @@
+ // Single player: the pilots to beat before Kreissack, as sp_wins bits (2 << pilot).
+ unsigned int pilot_single_player_opponents(void) {
+     unsigned int mask = 0;
+-    for(int id = 0; id < NUMBER_OF_PILOT_TYPES; id++) {
++    for(int id = 0; id < PILOT_TOURNAMENT_FIRST; id++) { // the tournament's pilots are no opponents
+         if(id != PILOT_KREISSACK) {
+             mask |= 2u << id;
+         }
+@@ -131,8 +173,8 @@
+ 
+ // A random pilot not yet beaten, other than the player's own; -1 when none is left.
+ int pilot_pick_single_player_opponent(int self, unsigned int wins) {
+-    int left[NUMBER_OF_PILOT_TYPES], count = 0;
+-    for(int id = 0; id < NUMBER_OF_PILOT_TYPES; id++) {
++    int left[PILOT_TOURNAMENT_FIRST], count = 0;
++    for(int id = 0; id < PILOT_TOURNAMENT_FIRST; id++) {
+         if(id != PILOT_KREISSACK && id != self && !((2u << id) & wins)) {
+             left[count++] = id;
+         }
+@@ -160,6 +202,9 @@
+     if(id >= NUMBER_OF_PILOT_TYPES) {
+         return NULL;
+     }
++    if(IS_TOURNAMENT_PILOT(id)) {
++        return tournament_pilot_upper_name(id);
++    }
+     return pilot_type_names[id];
+ }
+ 
+--- a/src/game/common_defines.h
++++ b/src/game/common_defines.h
+@@ -99,10 +99,13 @@
+     PILOT_KREISSACK,
+     PILOT_TRUMP, // web build: two more pilots, see game/utils/har_extended.c for their pictures
+     PILOT_MUSK,
+-    NUMBER_OF_PILOT_TYPES,
++    // web build: the World Championship's pilots (WORLD.TRN), see game/utils/tournament_pilots.h
++    PILOT_TOURNAMENT_FIRST,
++    NUMBER_OF_PILOT_TYPES = PILOT_TOURNAMENT_FIRST + 35,
+     // The original game's playable pilots, 0..9: Major Kreissack is not a playable character
+     NUMBER_OF_PLAYABLE_PILOT_TYPES = PILOT_KREISSACK,
+ };
++#define TOURNAMENT_PILOTS (NUMBER_OF_PILOT_TYPES - PILOT_TOURNAMENT_FIRST)
+ 
+ enum
+ {
+--- a/src/game/scenes/melee.c
++++ b/src/game/scenes/melee.c
+@@ -12,6 +12,7 @@
+ #include "game/protos/scene.h"
+ #include "game/scenes/melee.h"
+ #include "game/utils/har_extended.h"
++#include "game/utils/tournament_pilots.h"
+ #include "resources/af.h"
+ #include "resources/af_loader.h"
+ #include "resources/animation.h"
+@@ -48,6 +49,7 @@
+ typedef struct {
+     int row;
+     int column;
++    int pilot_page; // web build: the pilot grid's page, see PILOT_PAGES
+     bool done;
+ } cursor_data;
+ 
+@@ -55,10 +57,7 @@
+ // pilot page (top and bottom).
+ #define EXTRA_COLUMN 5
+ #define EXTRA_HARS (NUMBER_OF_HAR_TYPES - HAR_NOVA)
+-#define CURSOR_INDEX(local, player)                                                                                    \
+-    (local->cursor[player].column == EXTRA_COLUMN                                                                    \
+-         ? (local->page == HAR_SELECT ? HAR_NOVA : PILOT_TRUMP) + local->cursor[player].row                            \
+-         : 5 * local->cursor[player].row + local->cursor[player].column)
++#define CURSOR_INDEX(local, player) cursor_index(local, player)
+ #define CURSOR_A_DONE(local) (local->cursor[0].done)
+ #define CURSOR_B_DONE(local) (local->cursor[1].done)
+ #define CURSORS_MATCH(local) (CURSOR_INDEX(local, 0) == CURSOR_INDEX(local, 1))
+@@ -72,6 +71,11 @@
+ #define HAR_PANEL_Y 104
+ #define PILOT_PANEL_Y 106 // below the pilot's bio box
+ 
++// Web build: the pilot grid's pages. The first has the twelve pilots above, the others the World
++// Championship's (WORLD.TRN), twelve a page, six columns by two rows.
++#define PILOTS_PER_PAGE 12
++#define PILOT_PAGES (1 + (TOURNAMENT_PILOTS + PILOTS_PER_PAGE - 1) / PILOTS_PER_PAGE)
++
+ typedef enum
+ {
+     PILOT_SELECT = 0,
+@@ -93,7 +97,8 @@
+     object big_portrait_1;
+     object big_portrait_2;
+     object player2_placeholder;
+-    surface pilot_panel; // six column pilot grid, unselected pilots dimmed
++    surface pilot_panels[PILOT_PAGES]; // six column pilot grid per page, unselected pilots dimmed
++    int pilot_page_shown;               // the page on screen: the last one a cursor moved on
+     surface har_panel; // six column robot grid, unselected robots in grayscale
+ 
+     portrait pilot_portraits[NUMBER_OF_PILOT_TYPES]; // Kreissack's (10) stays empty
+@@ -117,6 +122,8 @@
+     text *wins[2];
+     text *har_title;
+     text *titles[2];
++    text *page_hint[PILOT_PAGES]; // which page is on screen, and that there are more
++    text *page_arrow[2];          // blinking at the grid's edges
+     text *player_name[2];
+     text *player_bio[2];
+     text *player_stats[3];
+@@ -131,6 +138,31 @@
+     bool network_game;
+ } melee_local;
+ 
++// The pilot or robot under a player's cursor.
++static int cursor_index(const melee_local *local, int player) {
++    const cursor_data *c = &local->cursor[player];
++    if(local->page == PILOT_SELECT && c->pilot_page > 0) {
++        return PILOT_TOURNAMENT_FIRST + PILOTS_PER_PAGE * (c->pilot_page - 1) + 6 * c->row + c->column;
++    }
++    if(c->column == EXTRA_COLUMN) {
++        return (local->page == HAR_SELECT ? HAR_NOVA : PILOT_TRUMP) + c->row;
++    }
++    return 5 * c->row + c->column;
++}
++
++// Whether a player's cursor is on a pilot: the last page may have empty cells.
++static bool pilot_cell_valid(const melee_local *local, int player) {
++    return local->page != PILOT_SELECT || local->cursor[player].pilot_page == 0 ||
++           tournament_pilot_get(cursor_index(local, player)) != NULL;
++}
++
++static void place_cursor(cursor_data *cursor, selection_page page, unsigned id);
++
++// Whether a player's cursor is on the page on screen.
++static bool cursor_shown(const melee_local *local, int player) {
++    return local->page != PILOT_SELECT || local->cursor[player].pilot_page == local->pilot_page_shown;
++}
++
+ void handle_action(scene *scene, int player, int action);
+ 
+ void melee_free(scene *scene) {
+@@ -166,15 +198,19 @@
+         text_free(&local->player_bio[i]);
+         text_free(&local->player_name[i]);
+         text_free(&local->titles[i]);
++        text_free(&local->page_arrow[i]);
+         text_free(&local->wins[i]);
+     }
++    for(int i = 0; i < PILOT_PAGES; i++) {
++        text_free(&local->page_hint[i]);
++        surface_free(&local->pilot_panels[i]);
++    }
+     for(int i = 0; i < 3; i++) {
+         text_free(&local->player_stats[i]);
+     }
+     text_free(&local->har_title);
+ 
+     object_free(&local->player2_placeholder);
+-    surface_free(&local->pilot_panel);
+     object_free(&local->big_portrait_1);
+     if(player2->selectable) {
+         object_free(&local->big_portrait_2);
+@@ -385,10 +421,10 @@
+     pilot p_a;
+     pilot_get_info(&p_a, pilot_id);
+ 
+-    // update the player palette
+-    sd_pilot_set_player_color(player->pilot, PRIMARY, p_a.color_1);
+-    sd_pilot_set_player_color(player->pilot, SECONDARY, p_a.color_2);
+-    sd_pilot_set_player_color(player->pilot, TERTIARY, p_a.color_3);
++    // update the player palette (a tournament pilot's own colors too)
++    tournament_pilot_set_player_color(player->pilot, pilot_id, PRIMARY, p_a.color_1);
++    tournament_pilot_set_player_color(player->pilot, pilot_id, SECONDARY, p_a.color_2);
++    tournament_pilot_set_player_color(player->pilot, pilot_id, TERTIARY, p_a.color_3);
+     palette_load_player_colors(&player->pilot->palette, player_id);
+ }
+ 
+@@ -406,6 +442,8 @@
+ 
+     int old_row = *row;
+     int old_column = *column;
++    int *pilot_page = &local->cursor[player].pilot_page;
++    int old_page = *pilot_page;
+     int last_column = EXTRA_COLUMN;
+ 
+     switch(action) {
+@@ -418,16 +456,23 @@
+                 *column = last_column;
+                 if(local->page == PILOT_SELECT) {
+                     local->cheat_pilot_stats[player] |= *row + 1;
++                    // web build: past the edge, the previous page of pilots
++                    *pilot_page = (*pilot_page + PILOT_PAGES - 1) % PILOT_PAGES;
++                    while(*column > 0 && !pilot_cell_valid(local, player)) {
++                        (*column)--;
++                    }
+                 }
+             }
+             reset_cursor_blinky(local, player);
+             break;
+         case ACT_RIGHT:
+             (*column)++;
+-            if(*column > last_column) {
++            if(*column > last_column || !pilot_cell_valid(local, player)) {
+                 *column = 0;
+                 if(local->page == PILOT_SELECT) {
+                     local->cheat_pilot_stats[player] |= *row + 1;
++                    // web build: past the edge (or the last pilot), the next page of pilots
++                    *pilot_page = (*pilot_page + 1) % PILOT_PAGES;
+                 }
+             }
+             reset_cursor_blinky(local, player);
+@@ -441,6 +486,9 @@
+         case ACT_DOWN:
+             if(*row == 0) {
+                 *row = 1;
++                if(!pilot_cell_valid(local, player)) {
++                    *row = 0; // nobody below
++                }
+             }
+             reset_cursor_blinky(local, player);
+             // nova selection cheat
+@@ -516,6 +564,13 @@
+                     local->pilot_id_a = CURSOR_INDEX(local, 0);
+                     local->pilot_id_b = CURSOR_INDEX(local, 1);
+                     local->page = HAR_SELECT;
++                    // web build: a World Championship pilot starts on the robot it fights with there
++                    for(int i = 0; i < 2; i++) {
++                        const sd_pilot *trn = tournament_pilot_get(i == 0 ? local->pilot_id_a : local->pilot_id_b);
++                        if(trn && trn->har_id < NUMBER_OF_HAR_TYPES) {
++                            place_cursor(&local->cursor[i], HAR_SELECT, trn->har_id);
++                        }
++                    }
+                     update_har(scene, 0);
+                     update_har(scene, 1);
+ 
+@@ -577,11 +632,12 @@
+             break;
+     }
+ 
+-    if(old_row != *row || old_column != *column) {
++    if(old_row != *row || old_column != *column || old_page != *pilot_page) {
+         // column 0..5 → panning -50..+50
+         int panning = (*column) * 100 / 5 - 50;
+         audio_play_sound_simple(19, panning);
+         if(local->page == PILOT_SELECT) {
++            local->pilot_page_shown = *pilot_page; // the page follows the cursor
+             if(player == 0) {
+                 local->pilot_id_a = CURSOR_INDEX(local, player);
+             } else {
+@@ -600,32 +656,43 @@
+     refresh_pilot_stats(local);
+ #endif
+ 
+-    if(*column != EXTRA_COLUMN) {
++    if(*column != EXTRA_COLUMN && (local->page != PILOT_SELECT || *pilot_page == 0)) {
+         local->cheat_selected[player][5 * (*row) + *column] = 1;
+     }
+ }
+ 
++// Move a cursor to the pilot or HAR `id` on `page`.
++static void place_cursor(cursor_data *cursor, selection_page page, unsigned id) {
++    // note: id can be 10 or more (HAR_NOVA, HAR_OCELOT, PILOT_KREISSACK, PILOT_TRUMP, PILOT_MUSK, the
++    // World Championship's pilots) when returning from VS. The robot page has cells for Nova and
++    // Ocelot, the pilot pages for Trump, Musk and the tournament's; there are none for Kreissack,
++    // which the original game handles surprisingly elegantly. If we try to naively do that, our
++    // pointers all explode.
++    cursor->pilot_page = 0;
++    if(id >= HAR_NOVA && page == HAR_SELECT) {
++        cursor->column = EXTRA_COLUMN;
++        cursor->row = id - HAR_NOVA;
++    } else if(id >= PILOT_TOURNAMENT_FIRST && id < NUMBER_OF_PILOT_TYPES && page == PILOT_SELECT) {
++        int n = id - PILOT_TOURNAMENT_FIRST;
++        cursor->pilot_page = 1 + n / PILOTS_PER_PAGE;
++        cursor->row = n % PILOTS_PER_PAGE / 6;
++        cursor->column = n % 6;
++    } else if(id >= PILOT_TRUMP && id < PILOT_TOURNAMENT_FIRST && page == PILOT_SELECT) {
++        cursor->column = EXTRA_COLUMN;
++        cursor->row = id - PILOT_TRUMP;
++    } else {
++        id = id >= 10 ? (page == HAR_SELECT ? HAR_FLAIL : PILOT_CRYSTAL) : id;
++        cursor->column = id % 5;
++        cursor->row = id / 5;
++    }
++    cursor->done = 0;
++}
++
+ // Move cursors to select Pilot or HARs specified by A and B.
+ static void restore_cursors_to(melee_local *local, unsigned a, unsigned b) {
+-    unsigned ids[2] = {a, b};
+-    for(int i = 0; i < 2; i++) {
+-        // note: a/b can be 10 or more (HAR_NOVA, HAR_OCELOT, PILOT_KREISSACK, PILOT_TRUMP, PILOT_MUSK)
+-        // when returning from VS. The robot page has cells for Nova and Ocelot, the pilot page for
+-        // Trump and Musk; it has none for Kreissack, which the original game handles surprisingly
+-        // elegantly. If we try to naively do that, our pointers all explode.
+-        if(ids[i] >= HAR_NOVA && local->page == HAR_SELECT) {
+-            local->cursor[i].column = EXTRA_COLUMN;
+-            local->cursor[i].row = ids[i] - HAR_NOVA;
+-        } else if(ids[i] >= PILOT_TRUMP && local->page == PILOT_SELECT) {
+-            local->cursor[i].column = EXTRA_COLUMN;
+-            local->cursor[i].row = ids[i] - PILOT_TRUMP;
+-        } else {
+-            unsigned id = ids[i] == HAR_NOVA ? HAR_FLAIL : ids[i];
+-            local->cursor[i].column = id % 5;
+-            local->cursor[i].row = id / 5;
+-        }
+-        local->cursor[i].done = 0;
+-    }
++    place_cursor(&local->cursor[0], local->page, a);
++    place_cursor(&local->cursor[1], local->page, b);
++    local->pilot_page_shown = local->cursor[0].pilot_page;
+ }
+ 
+ void melee_input_tick(scene *scene) {
+@@ -686,12 +753,16 @@
+ 
+ static void render_highlights(const melee_local *local, bool player2_is_selectable) {
+     if(player2_is_selectable && CURSORS_MATCH(local)) {
+-        draw_highlight(local, &local->cursor[0], VIOLET_CURSOR_INDEX);
++        if(cursor_shown(local, 0)) {
++            draw_highlight(local, &local->cursor[0], VIOLET_CURSOR_INDEX);
++        }
+     } else {
+-        if(player2_is_selectable) {
++        if(player2_is_selectable && cursor_shown(local, 1)) {
+             draw_highlight(local, &local->cursor[1], BLUE_CURSOR_INDEX);
+         }
+-        draw_highlight(local, &local->cursor[0], RED_CURSOR_INDEX);
++        if(cursor_shown(local, 0)) {
++            draw_highlight(local, &local->cursor[0], RED_CURSOR_INDEX);
++        }
+     }
+ }
+ 
+@@ -759,12 +830,21 @@
+         text_draw(local->titles[0], 160, 97);
+     }
+ 
+-    video_draw(&local->pilot_panel, 0, PILOT_PANEL_Y);
++    video_draw(&local->pilot_panels[local->pilot_page_shown], 0, PILOT_PANEL_Y);
++    text_draw(local->page_hint[local->pilot_page_shown], 0, PILOT_PANEL_Y + 1);
++    if(local->ticks / 20 % 2 == 0) { // blinking, at the grid's edges: there are more pilots past them
++        text_draw(local->page_arrow[0], 0, HAR_CELL_Y(1) - 6);
++        text_draw(local->page_arrow[1], 320 - 7, HAR_CELL_Y(1) - 6);
++    }
+     render_highlights(local, player2_is_selectable);
+-    render_enabled_portrait(local->pilot_portraits, CURSOR_INDEX(local, 0), -1);
++    if(cursor_shown(local, 0)) {
++        render_enabled_portrait(local->pilot_portraits, CURSOR_INDEX(local, 0), -1);
++    }
+     object_render(&local->big_portrait_1);
+     if(player2_is_selectable) {
+-        render_enabled_portrait(local->pilot_portraits, CURSOR_INDEX(local, 1), -1);
++        if(cursor_shown(local, 1)) {
++            render_enabled_portrait(local->pilot_portraits, CURSOR_INDEX(local, 1), -1);
++        }
+         object_render(&local->big_portrait_2);
+     }
+ }
+@@ -924,6 +1004,11 @@
+         portrait *target = &local->pilot_portraits[i];
+         int col = i >= PILOT_TRUMP ? EXTRA_COLUMN : i % 5;
+         int row = i >= PILOT_TRUMP ? i - PILOT_TRUMP : i / 5;
++        if(i >= PILOT_TOURNAMENT_FIRST) {
++            // web build: the World Championship's pilots, on the pages after the first
++            col = (i - PILOT_TOURNAMENT_FIRST) % 6;
++            row = (i - PILOT_TOURNAMENT_FIRST) % PILOTS_PER_PAGE / 6;
++        }
+         target->x = HAR_CELL_X(col);
+         target->y = HAR_CELL_Y(row);
+ 
+@@ -942,7 +1027,14 @@
+ 
+         // Copy the face image in dimmed color (shown when not selected)
+         surface_create_from(&target->disabled, &target->enabled);
+-        if(i >= PILOT_TRUMP) {
++        if(i >= PILOT_TOURNAMENT_FIRST) {
++            // drawn in 0xA1..0xEF, whose darker copies the menu palette keeps at 0x01..0x4F
++            for(int k = 0; k < target->disabled.w * target->disabled.h; k++) {
++                if(target->disabled.data[k] > 0xA0 && target->disabled.data[k] != target->disabled.transparent) {
++                    target->disabled.data[k] -= 0xA0;
++                }
++            }
++        } else if(i >= PILOT_TRUMP) {
+             pilot_pictures_dim(&target->disabled);
+         } else {
+             surface_compress_index_blocks(&target->disabled, 0x60, 0xA0, 64, 16);
+@@ -953,27 +1045,32 @@
+         }
+     }
+ 
+-    // the unselected icons: the original sheet (dimmed by the palette), re-cut to six columns
++    // the unselected icons, one panel per page: the background's grid re-cut to six columns
+     const surface *bg = &scene->bk_data->background;
+-    const sprite *sheet = animation_get_sprite(&bk_get_info(scene->bk_data, 0)->ani, 0);
+-    surface_create(&local->pilot_panel, 320, 200 - PILOT_PANEL_Y);
+-    surface_set_transparency(&local->pilot_panel, -1);
+-    for(int y = 0; y < local->pilot_panel.h; y++) {
+-        for(int x = 0; x < 320; x++) {
+-            local->pilot_panel.data[y * 320 + x] = bg->data[(PILOT_PANEL_Y + y) * bg->w + har_panel_source_x(x)];
++    for(int page = 0; page < PILOT_PAGES; page++) {
++        surface *panel = &local->pilot_panels[page];
++        surface_create(panel, 320, 200 - PILOT_PANEL_Y);
++        surface_set_transparency(panel, -1);
++        for(int y = 0; y < panel->h; y++) {
++            for(int x = 0; x < 320; x++) {
++                panel->data[y * 320 + x] = bg->data[(PILOT_PANEL_Y + y) * bg->w + har_panel_source_x(x)];
++            }
+         }
+     }
++    // the first page: the original sheet (dimmed by the palette), Trump and Musk
++    const sprite *sheet = animation_get_sprite(&bk_get_info(scene->bk_data, 0)->ani, 0);
+     for(int i = 0; i < 10; i++) {
+         surface cell;
+         surface_create_from_surface(&cell, HAR_CELL_W, 36, 62 * (i % 5) + 2, 42 * (i / 5), sheet->data);
+         surface_set_transparency(&cell, -1);
+-        blit_opaque(&local->pilot_panel, &cell, HAR_CELL_X(i % 5), HAR_CELL_Y(i / 5) - PILOT_PANEL_Y);
++        blit_opaque(&local->pilot_panels[0], &cell, HAR_CELL_X(i % 5), HAR_CELL_Y(i / 5) - PILOT_PANEL_Y);
+         surface_free(&cell);
+     }
+     for(int i = PILOT_TRUMP; i < NUMBER_OF_PILOT_TYPES; i++) {
+         portrait *target = &local->pilot_portraits[i];
++        int page = i < PILOT_TOURNAMENT_FIRST ? 0 : 1 + (i - PILOT_TOURNAMENT_FIRST) / PILOTS_PER_PAGE;
+         if(target->disabled.data) {
+-            blit_opaque(&local->pilot_panel, &target->disabled, target->x, target->y - PILOT_PANEL_Y);
++            blit_opaque(&local->pilot_panels[page], &target->disabled, target->x, target->y - PILOT_PANEL_Y);
+         }
+     }
+ }
+@@ -1124,6 +1221,22 @@
+     local->titles[0] = create_green_text(160, 6, lang_get(187)); // 'choose your pilot'
+     local->titles[1] = create_green_text(160, 6, lang_get(186)); // 'choose your robot'
+ 
++    // web build: the pilot pages; with two players only the page fits between their wins
++    for(int page = 0; page < PILOT_PAGES; page++) {
++        char hint[80];
++        if(player2->selectable) {
++            snprintf(hint, sizeof(hint), "< PAGE %d OF %d >", page + 1, PILOT_PAGES);
++        } else if(page == 0) {
++            snprintf(hint, sizeof(hint), "< PAGE 1 OF %d >   %d TOURNAMENT PILOTS: LEFT/RIGHT", PILOT_PAGES,
++                     TOURNAMENT_PILOTS);
++        } else {
++            snprintf(hint, sizeof(hint), "< PAGE %d OF %d >   WORLD CHAMPIONSHIP PILOTS", page + 1, PILOT_PAGES);
++        }
++        local->page_hint[page] = create_green_text(320, 6, hint);
++    }
++    local->page_arrow[0] = create_green_text(7, 6, "<");
++    local->page_arrow[1] = create_green_text(7, 6, ">");
++
+     // This is used to either show the selected HAR name or both in the "X VS. Y" format.
+     local->har_title = create_black_text(320, 6, har_get_name(CURSOR_INDEX(local, 0)));
+ 
+--- a/src/game/utils/har_extended.c
++++ b/src/game/utils/har_extended.c
+@@ -355,6 +355,9 @@
+ 
+ void pilot_pictures_dim(surface *icon) {
+     for(int id = PILOT_TRUMP; id < NUMBER_OF_PILOT_TYPES; id++) {
++        if(!pictures_get(id)) {
++            continue; // the World Championship's pilots are in the scenes' own colors
++        }
+         int from = menu_block(id), to = dim_block(id);
+         for(int i = 0; i < icon->w * icon->h; i++) {
+             if(icon->data[i] >= from && icon->data[i] < from + PICTURE_COLORS) {
+--- a/src/resources/pilots.c
++++ b/src/resources/pilots.c
+@@ -1,6 +1,8 @@
+ 
+ #include "resources/pilots.h"
+ #include "game/common_defines.h"
++#include "game/utils/tournament_pilots.h"
++#include "utils/miscmath.h"
+ 
+ void pilot_get_info(pilot *pilot, int id) {
+     // TODO read this from MASTER.DAT
+@@ -114,5 +116,22 @@
+             pilot->color_2 = 10;
+             pilot->color_3 = 0;
+             break;
++        default: {
++            // web build: a World Championship pilot. Its stats on the select screen's scale: the
++            // original pilots' sum to 30, their World Championship selves' to about 44.
++            const sd_pilot *p = tournament_pilot_get(id);
++            if(p == NULL) {
++                break;
++            }
++            pilot->power = clamp((p->power * 30 + 22) / 44, 1, 20);
++            pilot->agility = clamp((p->agility * 30 + 22) / 44, 1, 20);
++            pilot->endurance = clamp((p->endurance * 30 + 22) / 44, 1, 20);
++            // 0..15: an altpal, 16: the pilot's own colors, 255: any, here one per pilot
++            pilot->color_1 = p->color_1 <= 16 ? p->color_1 : (id * 5) % 16;
++            pilot->color_2 = p->color_2 <= 16 ? p->color_2 : (id * 5 + 7) % 16;
++            pilot->color_3 = p->color_3 <= 16 ? p->color_3 : (id * 5 + 11) % 16;
++            pilot->sex = tournament_pilot_sex(id);
++            break;
++        }
+     }
+ }
+--- /dev/null
++++ b/src/game/utils/tournament_pilots.c
+@@ -0,0 +1,133 @@
++#include "game/utils/tournament_pilots.h"
++#include "formats/error.h"
++#include "formats/pic.h"
++#include "game/common_defines.h"
++#include "resources/resource_files.h"
++#include "resources/trnmanager.h"
++#include "utils/c_string_util.h"
++#include "utils/log.h"
++#include <ctype.h>
++#include <stdio.h>
++#include <string.h>
++
++static sd_tournament_file world;
++static int count = -1; // -1: not loaded yet
++static char upper_names[TOURNAMENT_PILOTS][32];
++static char bios[TOURNAMENT_PILOTS][128];
++static int sexes[TOURNAMENT_PILOTS];
++static vga_palette photo_palettes[TOURNAMENT_PILOTS]; // color 16: the robot in the photo's colors
++
++static void load(void) {
++    if(count >= 0) {
++        return;
++    }
++    count = 0;
++    if(trn_load(&world, "WORLD.TRN") != 0) {
++        return;
++    }
++    count = world.enemy_count < TOURNAMENT_PILOTS ? world.enemy_count : TOURNAMENT_PILOTS;
++
++    // female or male: the photo says
++    sd_pic_file pic;
++    sd_pic_create(&pic);
++    const path filename = get_resource_filename("WORLD.PIC");
++    bool has_pic = sd_pic_load(&pic, &filename) == SD_SUCCESS;
++
++    int rank = 0;
++    for(int n = 0; n < count; n++) {
++        const sd_pilot *p = world.enemies[n];
++        snprintf(upper_names[n], sizeof(upper_names[n]), "%s", str_c(&p->name));
++        for(char *c = upper_names[n]; *c; c++) {
++            *c = toupper((unsigned char)*c);
++        }
++        const sd_pic_photo *photo = has_pic ? sd_pic_get(&pic, p->photo_id) : NULL;
++        sexes[n] = photo && photo->sex ? PILOT_SEX_FEMALE : PILOT_SEX_MALE;
++        if(photo) {
++            photo_palettes[n] = photo->pal;
++        }
++        const char *robot = p->har_id < NUMBER_OF_HAR_TYPES ? har_get_name(p->har_id) : "any";
++        if(p->secret) {
++            snprintf(bios[n], sizeof(bios[n]), "A secret challenger of the World Championship. Robot: %s.", robot);
++        } else {
++            snprintf(bios[n], sizeof(bios[n]), "World Championship, ranked %d. Robot: %s.", ++rank, robot);
++        }
++    }
++    if(has_pic) {
++        sd_pic_free(&pic);
++    }
++    log_info("Tournament pilots: %d from WORLD.TRN", count);
++}
++
++static int index_of(int pilot_id) {
++    load();
++    int n = pilot_id - PILOT_TOURNAMENT_FIRST;
++    return n >= 0 && n < count ? n : -1;
++}
++
++const sd_pilot *tournament_pilot_get(int pilot_id) {
++    int n = index_of(pilot_id);
++    return n < 0 ? NULL : world.enemies[n];
++}
++
++const char *tournament_pilot_upper_name(int pilot_id) {
++    int n = index_of(pilot_id);
++    return n < 0 ? "" : upper_names[n];
++}
++
++const char *tournament_pilot_bio(int pilot_id) {
++    int n = index_of(pilot_id);
++    return n < 0 ? "" : bios[n];
++}
++
++int tournament_pilot_sex(int pilot_id) {
++    int n = index_of(pilot_id);
++    return n < 0 ? PILOT_SEX_MALE : sexes[n];
++}
++
++// Names compared on their letters only: "Jean-Paul" is WORLD.TRN's "Jean Paul".
++static bool same_name(const char *a, const char *b) {
++    for(;;) {
++        while(*a && !isalpha((unsigned char)*a)) {
++            a++;
++        }
++        while(*b && !isalpha((unsigned char)*b)) {
++            b++;
++        }
++        if(!*a || !*b) {
++            return !*a && !*b;
++        }
++        if(toupper((unsigned char)*a++) != toupper((unsigned char)*b++)) {
++            return false;
++        }
++    }
++}
++
++const char *tournament_pilot_quote_by_name(const char *name) {
++    load();
++    for(int n = 0; n < count; n++) {
++        if(same_name(str_c(&world.enemies[n]->name), name) && str_size(&world.enemies[n]->quotes[0]) > 0) {
++            return str_c(&world.enemies[n]->quotes[0]);
++        }
++    }
++    return NULL;
++}
++
++void tournament_pilot_set_player_color(sd_pilot *pilot, int pilot_id, player_color index, uint8_t color) {
++    int n = index_of(pilot_id);
++    if(color != 16 || n < 0) {
++        sd_pilot_set_player_color(pilot, index, color);
++        return;
++    }
++    switch(index) {
++        case TERTIARY:
++            pilot->color_3 = color;
++            break;
++        case SECONDARY:
++            pilot->color_2 = color;
++            break;
++        case PRIMARY:
++            pilot->color_1 = color;
++            break;
++    }
++    memcpy(&pilot->palette.colors[index * 0x10], &photo_palettes[n].colors[index * 0x10], 0x10 * sizeof(vga_color));
++}
+--- /dev/null
++++ b/src/game/utils/tournament_pilots.h
+@@ -0,0 +1,26 @@
++#ifndef TOURNAMENT_PILOTS_H
++#define TOURNAMENT_PILOTS_H
++
++#include "formats/pilot.h"
++
++// Web build: the World Championship's pilots (WORLD.TRN), playable in one and two player
++// games as pilot ids PILOT_TOURNAMENT_FIRST and up, in the tournament's order. Their faces
++// and icons are in MELEE.BK and VS.BK at those ids (tools/web/tournament/trnfaces.c).
++
++// The pilot as WORLD.TRN has it; NULL for the other pilots (or without WORLD.TRN).
++const sd_pilot *tournament_pilot_get(int pilot_id);
++
++// Name as the score board spells it, bio for the select screen, and female or male.
++const char *tournament_pilot_upper_name(int pilot_id);
++const char *tournament_pilot_bio(int pilot_id);
++int tournament_pilot_sex(int pilot_id);
++
++// What the pilot named `name` says in the World Championship (the original pilots are in it
++// too); NULL if nobody there has that name.
++const char *tournament_pilot_quote_by_name(const char *name);
++
++// A player color as sd_pilot_set_player_color() sets it, except that 16 takes the tournament
++// pilot's own colors (from its photo in WORLD.PIC, as the tournament does).
++void tournament_pilot_set_player_color(sd_pilot *pilot, int pilot_id, player_color index, uint8_t color);
++
++#endif // TOURNAMENT_PILOTS_H
