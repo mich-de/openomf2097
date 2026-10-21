@@ -38,6 +38,51 @@
      }
  }
  
+--- a/src/formats/chr.c
++++ b/src/formats/chr.c
+@@ -64,6 +64,13 @@
+     sd_sprite_copy(chr->photo, pilot->photo);
+ }
+ 
++// The photo of a tournament's pilot. Web build: some fan-made tournaments name photos their PIC
++// does not have; those pilots get its first one.
++static const sd_pic_photo *trn_photo(const sd_pic_file *pic, int photo_id) {
++    const sd_pic_photo *photo = sd_pic_get(pic, photo_id);
++    return photo ? photo : sd_pic_get(pic, 0);
++}
++
+ int sd_chr_load(sd_chr_file *chr, const path *filename) {
+     assert(chr != NULL);
+     assert(filename != NULL);
+@@ -124,15 +131,15 @@
+             purchase_random_har(&chr->enemies[i]->pilot);
+         }
+         purchase_random_har_upgrades(&chr->enemies[i]->pilot);
+-        if(trn_loaded) {
+-            memcpy(&chr->enemies[i]->pilot.palette, &sd_pic_get(&pic, trn.enemies[i]->photo_id)->pal,
+-                   sizeof(vga_palette));
++        const sd_pic_photo *photo = trn_loaded ? trn_photo(&pic, trn.enemies[i]->photo_id) : NULL;
++        if(trn_loaded && photo) {
++            memcpy(&chr->enemies[i]->pilot.palette, &photo->pal, sizeof(vga_palette));
+             chr->enemies[i]->pilot.photo = omf_calloc(1, sizeof(sd_sprite));
+             if(trn.enemies[i]->photo) {
+                 log_info("using pilot photo %d from tournament", i);
+                 sd_sprite_copy(chr->enemies[i]->pilot.photo, trn.enemies[i]->photo);
+             } else {
+-                sd_sprite_copy(chr->enemies[i]->pilot.photo, sd_pic_get(&pic, trn.enemies[i]->photo_id)->sprite);
++                sd_sprite_copy(chr->enemies[i]->pilot.photo, photo->sprite);
+             }
+             //  copy all the "pilot" fields (eg. winnings) over from the tournament file
+             chr->enemies[i]->pilot.trn_rank_money = trn.enemies[i]->trn_rank_money;
+@@ -177,7 +184,7 @@
+             chr->enemies[i]->pilot.winnings = trn.enemies[i]->winnings;
+             chr->enemies[i]->pilot.total_value = trn.enemies[i]->total_value;
+             chr->enemies[i]->pilot.photo_id = trn.enemies[i]->photo_id;
+-            chr->enemies[i]->pilot.sex = sd_pic_get(&pic, trn.enemies[i]->photo_id)->sex;
++            chr->enemies[i]->pilot.sex = photo->sex;
+         }
+         memread_buf(mr, chr->enemies[i]->unknown_a, 9);
+         chr->enemies[i]->trn_index = memread_ubyte(mr);
 --- a/src/game/common_defines.c
 +++ b/src/game/common_defines.c
 @@ -1,4 +1,5 @@
@@ -213,6 +258,25 @@
      // 0 is selected by default, so nothing to do if we hit that.
      if(pal_index > 0 && pal_index < vector_size(&scene->bk_data->palettes)) {
          vga_state_set_base_palette_from_range(bk_get_palette(scene->bk_data, pal_index), 0x60, 0x60, 0x40);
+@@ -1854,14 +1868,14 @@
+             game_state_add_object(scene->gs, portrait, RENDER_LAYER_TOP, 0, 0);
+         }
+         if(!player->pilot->photo) {
+-            // Create round tokens: under the portrait, when there is one
+-            int token_y = portrait_sprite ? 9 + 42 : 9;
++            // Create round tokens: beside the portrait, outwards from it, when there is one
++            int token_y = portrait_sprite ? 25 : 9;
+             for(int j = 0; j < 4; j++) {
+                 if(j < ceilf(local->rounds / 2.0f)) {
+                     object *round_token = omf_calloc(1, sizeof(object));
+-                    int xoff = 110 + 9 * j + 3 + j;
++                    int xoff = portrait_sprite ? 94 - 10 * j : 110 + 9 * j + 3 + j;
+                     if(i == 1) {
+-                        xoff = 210 - 9 * j - 3 - j;
++                        xoff = portrait_sprite ? 226 + 10 * j : 210 - 9 * j - 3 - j;
+                     }
+                     animation *ani = &bk_get_info(scene->bk_data, 27)->ani;
+                     object_create(round_token, scene->gs, vec2i_create(xoff, token_y), vec2f_create(0, 0));
 --- a/src/game/scenes/melee.c
 +++ b/src/game/scenes/melee.c
 @@ -12,6 +12,7 @@

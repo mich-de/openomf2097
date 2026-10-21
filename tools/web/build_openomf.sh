@@ -222,6 +222,9 @@ if [ ! -x "$TRNFACES" ] || [ "$REPO/tools/web/tournament/trnfaces.c" -nt "$TRNFA
 fi
 "$TRNFACES" "$DATA/resources"
 
+# Fan-made tournaments, next to the original four (tools/web/tournaments/README.md).
+cp "$REPO"/tools/web/tournaments/*.TRN "$REPO"/tools/web/tournaments/*.PIC "$DATA/resources/"
+
 for L in ENGLISH GERMAN; do
     "$LT" -i "$SRC/resources/${L}2.TXT" -o "$DATA/resources/${L}.DAT2" --check-count 1
 done

@@ -2,14 +2,14 @@
 //
 //   trnfaces <resources-dir>
 //
-// reads  WORLD.TRN, WORLD.PIC, MELEE.BK, VS.BK, ARENA3.BK, FIGHTR1.AF, FIGHTR5.AF
+// reads  WORLD.TRN, WORLD.PIC, MELEE.BK, VS.BK, ARENA3.BK
 // writes MELEE.BK with their grid icons (animation 3) and big faces (animation 4), and
 //        VS.BK with their big faces (animation 4), at sprite indices 13.. (the engine's
 //        PILOT_TOURNAMENT_FIRST, after Trump's and Musk's), one per pilot in WORLD.TRN's order
 //        but the original ten (they are in it too), then Fire and Ice (PILOT_FIRE, PILOT_ICE).
 //
-// Fire and Ice, the single player game's secret opponents, have no photo: their faces are their
-// robots' heads (Fire's Katana, Ice's Shadow) in the colors the Fire Pit gives them.
+// Fire and Ice, the single player game's secret opponents, have no photo: their faces are Nicoli's
+// (half red, half blue already) in the colors the Fire Pit gives their robots.
 //
 // The others' faces are the tournament's own photos, cropped to the original pilots' 57x57 like
 // theirs, and the icons (51x36, on black) close-ups of them. A photo's first 48 colors are
@@ -20,15 +20,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <math.h>
 #include <string.h>
 
-#include "formats/af.h"
 #include "formats/bk.h"
 #include "formats/bkanim.h"
 #include "formats/error.h"
 #include "formats/pic.h"
 #include "formats/sprite.h"
-#include "formats/move.h"
 #include "formats/tournament.h"
 #include "formats/vga_image.h"
 #include "utils/path.h"
@@ -41,7 +40,6 @@
 #define ICON_H 36
 #define WORLD_PILOTS 25 // the engine's PILOT_FIRE - PILOT_TOURNAMENT_FIRST
 #define MAX_PILOTS 64
-#define IDLE 11 // the robots' standing animation
 
 // The original pilots, who fight in the World Championship too (names compared on their letters).
 static const char *originals[] = {"Crystal", "Steffan", "Milano",   "Christian", "Shirro",
@@ -144,74 +142,33 @@ static void photo_face(rgba *out, const sd_pic_photo *photo, const vga_palette *
     sd_vga_image_free(&img);
 }
 
-// A secret opponent's face: its robot standing, from the top, `size` pixels square, scaled to the
-// face's 57x57, in the robot's colors (`ramps`, its palette's 48 first) and the scene's.
-static int robot_face(rgba *out, const char *dir, int har, int size, const vga_color *ramps, const vga_palette *scene) {
-    char fn[1024];
-    path p;
-    sd_af_file af;
-    sd_af_create(&af);
-    snprintf(fn, sizeof(fn), "%s/FIGHTR%d.AF", dir, har);
-    path_from_c(&p, fn);
-    if(sd_af_load(&af, &p) != SD_SUCCESS) {
-        fprintf(stderr, "cannot read %s\n", fn);
-        return 1;
-    }
-    sd_vga_image img;
-    sd_sprite_vga_decode(&img, sd_animation_get_sprite(sd_af_get_move(&af, IDLE)->animation, 0));
-    // the head: the topmost pixels, and the middle of the rows below them
-    int top = 0;
-    while(top < (int)img.h - 1) {
-        bool any = false;
-        for(unsigned x = 0; x < img.w; x++) {
-            any |= img.data[top * img.w + x] != 0;
-        }
-        if(any) {
-            break;
-        }
-        top++;
-    }
-    long sum = 0, count = 0;
-    for(int y = top; y < top + size && y < (int)img.h; y++) {
-        for(unsigned x = 0; x < img.w; x++) {
-            if(img.data[y * img.w + x]) {
-                sum += x;
-                count++;
-            }
+// A secret opponent's face: Nicoli's, lit red on one side and blue on the other, repainted in the
+// robot's colors (`ramp`, 16 shades from dark to light) by its brightness, stretched to the ramp.
+static void recolor_face(rgba *out, const rgba *face, const vga_color *ramp) {
+    int lo = 255 * 3, hi = 0;
+    for(int i = 0; i < FACE_SIZE * FACE_SIZE; i++) {
+        const unsigned char *p = face->px + i * 4;
+        int l = p[0] + p[1] + p[2];
+        if(p[3]) {
+            lo = l < lo ? l : lo;
+            hi = l > hi ? l : hi;
         }
     }
-    int left = (count ? (int)(sum / count) : (int)img.w / 2) - size / 2;
     rgba_create(out, FACE_SIZE, FACE_SIZE);
-    const float k = (float)size / FACE_SIZE;
-    for(int y = 0; y < FACE_SIZE; y++) {
-        for(int x = 0; x < FACE_SIZE; x++) {
-            float r = 0, g = 0, b = 0, a = 0, n = 0;
-            for(float sy = y * k; sy < (y + 1) * k; sy += 0.25f) {
-                for(float sx = x * k; sx < (x + 1) * k; sx += 0.25f) {
-                    int ix = left + (int)sx, iy = top + (int)sy;
-                    n++;
-                    unsigned char q = ix >= 0 && iy >= 0 && ix < (int)img.w && iy < (int)img.h ? img.data[iy * img.w + ix] : 0;
-                    if(q) {
-                        vga_color c = q < 48 ? ramps[q] : scene->colors[q];
-                        r += c.r;
-                        g += c.g;
-                        b += c.b;
-                        a++;
-                    }
-                }
-            }
-            unsigned char *o = out->px + (y * FACE_SIZE + x) * 4;
-            if(a * 2 >= n) {
-                o[0] = r / a;
-                o[1] = g / a;
-                o[2] = b / a;
-                o[3] = 255;
-            }
+    for(int i = 0; i < FACE_SIZE * FACE_SIZE; i++) {
+        const unsigned char *p = face->px + i * 4;
+        if(!p[3]) {
+            continue;
         }
+        // lifted (the photos are dark), so that the lights reach the ramp's top: flames' yellow, ice's white
+        float t = hi > lo ? (float)(p[0] + p[1] + p[2] - lo) / (hi - lo) : 0.5f;
+        int k = 2 + (int)(13 * powf(t, 0.6f) + 0.5f);
+        unsigned char *o = out->px + i * 4;
+        o[0] = ramp[k].r;
+        o[1] = ramp[k].g;
+        o[2] = ramp[k].b;
+        o[3] = 255;
     }
-    sd_vga_image_free(&img);
-    sd_af_free(&af);
-    return 0;
 }
 
 // The icon: the face scaled to 48x48 (area average), its rows 4..39 in the middle of 51.
@@ -373,7 +330,7 @@ int main(int argc, char **argv) {
     }
 
     rgba faces[MAX_PILOTS];
-    int count = 0;
+    int count = 0, nicoli = -1;
     for(int n = 0; n < trn.enemy_count && count < WORLD_PILOTS; n++) {
         if(is_original(str_c(&trn.enemies[n]->name))) {
             continue;
@@ -383,10 +340,13 @@ int main(int argc, char **argv) {
             fprintf(stderr, "no photo %d for %s\n", trn.enemies[n]->photo_id, str_c(&trn.enemies[n]->name));
             return 1;
         }
+        if(same_letters(str_c(&trn.enemies[n]->name), "Nicoli")) {
+            nicoli = count;
+        }
         photo_face(&faces[count++], photo, vs.palettes[0]);
     }
-    if(count != WORLD_PILOTS) {
-        fprintf(stderr, "%d World Championship pilots, not %d\n", count, WORLD_PILOTS);
+    if(count != WORLD_PILOTS || nicoli < 0) {
+        fprintf(stderr, "%d World Championship pilots, not %d, or no Nicoli\n", count, WORLD_PILOTS);
         return 1;
     }
 
@@ -399,15 +359,13 @@ int main(int argc, char **argv) {
         fprintf(stderr, "cannot read %s's palettes\n", fn);
         return 1;
     }
-    vga_color fire[48], ice[48];
-    for(int k = 0; k < 48; k++) {
+    vga_color fire[16], ice[16];
+    for(int k = 0; k < 16; k++) {
         fire[k] = pit.palettes[1]->colors[k];
-        ice[k] = pit.palettes[2]->colors[48 + k % 16];
+        ice[k] = pit.palettes[2]->colors[48 + k];
     }
-    if(robot_face(&faces[count++], argv[1], 5, 64, fire, vs.palettes[0]) ||
-       robot_face(&faces[count++], argv[1], 1, 64, ice, vs.palettes[0])) {
-        return 1;
-    }
+    recolor_face(&faces[count++], &faces[nicoli], fire);
+    recolor_face(&faces[count++], &faces[nicoli], ice);
     sd_bk_free(&pit);
     sd_bk_free(&vs);
 
