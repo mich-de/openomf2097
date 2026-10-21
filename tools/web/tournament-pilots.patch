@@ -404,7 +404,19 @@
  #endif
 --- a/src/game/scenes/arena.c
 +++ b/src/game/scenes/arena.c
-@@ -1777,6 +1777,21 @@
+@@ -745,7 +745,10 @@
+         local->over = 1;
+         local->winner = winner_player_id;
+         if(is_singleplayer(gs)) {
+-            player_winner->sp_wins |= 2 << player_loser->pilot->pilot_id;
++            // web build: the tournament's pilots are past the bits (2 << 31 and up wrap or vanish);
++            // bit 0, no pilot's, still tells the newsroom the player lost
++            int loser_id = player_loser->pilot->pilot_id;
++            player_winner->sp_wins |= loser_id < PILOT_TOURNAMENT_FIRST ? 2 << loser_id : 1;
+             if(player_loser->pilot->pilot_id == PILOT_KREISSACK && player_loser->pilot->har_id == HAR_NOVA) {
+                 har *loser_har = object_get_userdata(loser);
+                 log_debug("kreissack defeated");
+@@ -1777,6 +1780,21 @@
          pal_index = rand_int(vector_size(&scene->bk_data->palettes));
      }
  
@@ -426,7 +438,7 @@
      // 0 is selected by default, so nothing to do if we hit that.
      if(pal_index > 0 && pal_index < vector_size(&scene->bk_data->palettes)) {
          vga_state_set_base_palette_from_range(bk_get_palette(scene->bk_data, pal_index), 0x60, 0x60, 0x40);
-@@ -1854,14 +1869,14 @@
+@@ -1854,14 +1872,14 @@
              game_state_add_object(scene->gs, portrait, RENDER_LAYER_TOP, 0, 0);
          }
          if(!player->pilot->photo) {
@@ -997,7 +1009,20 @@
  #include "resources/ids.h"
  #include "resources/languages.h"
  #include "resources/pilots.h"
-@@ -295,9 +296,11 @@
+@@ -276,7 +277,11 @@
+                             } else {
+                                 log_debug("wins are %d", p1->sp_wins);
+                                 unsigned all = pilot_single_player_opponents() | (2u << PILOT_KREISSACK);
+-                                if(p1->sp_wins == (int)(all & ~(2u << p1->pilot->pilot_id))) {
++                                // the player's own bit: none for the tournament's pilots, whose ids
++                                // are past the bits (shifted that far, it wrapped onto a pilot's)
++                                int self = p1->pilot->pilot_id;
++                                unsigned own = self < PILOT_TOURNAMENT_FIRST ? 2u << self : 0;
++                                if(p1->sp_wins == (int)(all & ~own)) {
+                                     // won the game
+                                     game_state_set_next(scene->gs, SCENE_END);
+                                 } else {
+@@ -295,9 +300,11 @@
                                      p2->pilot->power = p.power;
                                      p2->pilot->agility = p.agility;
                                      p2->pilot->sex = p.sex;
