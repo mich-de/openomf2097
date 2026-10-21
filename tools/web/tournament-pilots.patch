@@ -6,7 +6,20 @@
  #include "controller/controller.h"
  #include "formats/pilot.h"
  #include "game/game_state.h"
-@@ -1054,6 +1055,31 @@
+@@ -15,9 +16,10 @@
+ #include "utils/vec.h"
+ #include <math.h>
+ 
+-// OCELOT is JAGUAR re-skinned, with the same moves: the AI plays it as JAGUAR.
++// OCELOT is JAGUAR re-skinned, with the same moves, and the hacked robots have their originals'
++// moves and more: the AI plays them as their originals.
+ static int ai_har_kind(const har *h) {
+-    return h->id == HAR_OCELOT ? HAR_JAGUAR : h->id;
++    return har_original(h->id);
+ }
+ 
+ /* times thrown before we AI learns its lesson */
+@@ -1054,6 +1056,31 @@
              pilot->learning = 4.0f;
              pilot->forget = 0.1f;
              break;
@@ -99,7 +112,33 @@
  #include <string.h>
  
  const char *ai_difficulty_names[] = {
-@@ -90,20 +92,46 @@
+@@ -24,7 +26,8 @@
+                                   "KREISSACK", "TRUMP",   "MUSK"};
+ 
+ const char *har_type_names[] = {"JAGUAR",   "SHADOW", "THORN",    "PYROS",   "ELECTRA", "KATANA",
+-                                "SHREDDER", "FLAIL",  "GARGOYLE", "CHRONOS", "NOVA",    "OCELOT"};
++                                "SHREDDER", "FLAIL",  "GARGOYLE", "CHRONOS", "NOVA",    "OCELOT",
++                                "SUPERJAG", "SHADOW X"};
+ 
+ const char *scene_type_names[] = {
+     "SCENE_NONE",   "SCENE_INTRO",    "SCENE_OPENOMF",      "SCENE_MENU",       "SCENE_END",
+@@ -54,8 +57,13 @@
+ // The HAR's name as the game's texts spell it ("Jaguar"). The language files only
+ // know the original eleven.
+ const char *har_get_lang_name(unsigned int id) {
+-    if(id == HAR_OCELOT) {
+-        return "Ocelot";
++    switch(id) {
++        case HAR_OCELOT:
++            return "Ocelot";
++        case HAR_SUPERJAG:
++            return "SuperJag";
++        case HAR_SHADOW_X:
++            return "Shadow X";
+     }
+     return lang_get(LANG_STR_HAR + id);
+ }
+@@ -90,20 +98,46 @@
      },
  };
  #define EXTRA_PILOT(id) (&extra_pilots[(id) - PILOT_TRUMP])
@@ -148,7 +187,7 @@
      if(target >= PILOT_TRUMP) {
          return EXTRA_PILOT(target)->taunted[reply];
      }
-@@ -112,7 +140,21 @@
+@@ -112,7 +146,21 @@
  
  // The ending texts: part 1 with the pilot's face, part 2 after it.
  const char *pilot_get_ending_text(unsigned int id, int part) {
@@ -171,7 +210,7 @@
          return EXTRA_PILOT(id)->ending[part == 1 ? 0 : 1];
      }
      return lang_get((part == 1 ? 993 : 1003) + id);
-@@ -121,7 +163,7 @@
+@@ -121,7 +169,7 @@
  // Single player: the pilots to beat before Kreissack, as sp_wins bits (2 << pilot).
  unsigned int pilot_single_player_opponents(void) {
      unsigned int mask = 0;
@@ -180,7 +219,7 @@
          if(id != PILOT_KREISSACK) {
              mask |= 2u << id;
          }
-@@ -131,8 +173,8 @@
+@@ -131,8 +179,8 @@
  
  // A random pilot not yet beaten, other than the player's own; -1 when none is left.
  int pilot_pick_single_player_opponent(int self, unsigned int wins) {
@@ -191,7 +230,7 @@
          if(id != PILOT_KREISSACK && id != self && !((2u << id) & wins)) {
              left[count++] = id;
          }
-@@ -160,6 +202,9 @@
+@@ -160,6 +208,9 @@
      if(id >= NUMBER_OF_PILOT_TYPES) {
          return NULL;
      }
@@ -201,9 +240,45 @@
      return pilot_type_names[id];
  }
  
+@@ -199,3 +250,16 @@
+ int har_to_resource(unsigned int id) {
+     return AF_JAGUAR + id;
+ }
++
++// The original robot a web build robot is made from (itself for the original eleven): it fights
++// with that robot's moves, more or less, and has its pictures.
++int har_original(unsigned int id) {
++    switch(id) {
++        case HAR_OCELOT:
++        case HAR_SUPERJAG:
++            return HAR_JAGUAR;
++        case HAR_SHADOW_X:
++            return HAR_SHADOW;
++    }
++    return id;
++}
 --- a/src/game/common_defines.h
 +++ b/src/game/common_defines.h
-@@ -99,10 +99,16 @@
+@@ -20,6 +20,7 @@
+ int scene_get_id(const char *);
+ 
+ int har_to_resource(unsigned int id);
++int har_original(unsigned int id);
+ 
+ int rand_arena(void);
+ 
+@@ -80,7 +81,9 @@
+     HAR_GARGOYLE,
+     HAR_CHRONOS,
+     HAR_NOVA,
+-    HAR_OCELOT, // web build: Jaguar re-skinned, see tools/web/ocelot
++    HAR_OCELOT,   // web build: Jaguar re-skinned, see tools/web/ocelot
++    HAR_SUPERJAG, // web build: two robots the players hacked, see tools/web/hacked: Jaguar
++    HAR_SHADOW_X, // with new moves, and Shadow with some of its own changed
+     NUMBER_OF_HAR_TYPES,
+ };
+ 
+@@ -99,10 +102,16 @@
      PILOT_KREISSACK,
      PILOT_TRUMP, // web build: two more pilots, see game/utils/har_extended.c for their pictures
      PILOT_MUSK,
@@ -235,6 +310,18 @@
  
      af_move *move;
      int extra_index;
+@@ -2859,8 +2865,9 @@
+                 int enhancements = har_id < (int)sizeof(pilot->enhancements) ? pilot->enhancements[har_id] : 0;
+ #ifdef __EMSCRIPTEN__
+                 // web build: outside the tournament every HAR has its tournament enhancements,
+-                // all three (Shadow's longer shadows and shadow grab, Katana's extra blades, ...)
+-                if(!is_tournament(obj->gs) && har_id < (int)sizeof(pilot->enhancements)) {
++                // all three (Shadow's longer shadows and shadow grab, Katana's extra blades, ...);
++                // the hacked robots too, some of whose new moves want them
++                if(!is_tournament(obj->gs) && (har_id < (int)sizeof(pilot->enhancements) || har_id >= HAR_SUPERJAG)) {
+                     enhancements = 3;
+                 }
+ #endif
 --- a/src/game/scenes/arena.c
 +++ b/src/game/scenes/arena.c
 @@ -1777,6 +1777,20 @@
@@ -291,11 +378,11 @@
  typedef struct {
      int row;
      int column;
-+    int pilot_page; // web build: the pilot grid's page, see PILOT_PAGES
++    int pilot_page; // web build: the grid's page, see PILOT_PAGES and HAR_PAGES
      bool done;
  } cursor_data;
  
-@@ -55,10 +57,7 @@
+@@ -55,15 +57,13 @@
  // pilot page (top and bottom).
  #define EXTRA_COLUMN 5
  #define EXTRA_HARS (NUMBER_OF_HAR_TYPES - HAR_NOVA)
@@ -307,7 +394,14 @@
  #define CURSOR_A_DONE(local) (local->cursor[0].done)
  #define CURSOR_B_DONE(local) (local->cursor[1].done)
  #define CURSORS_MATCH(local) (CURSOR_INDEX(local, 0) == CURSOR_INDEX(local, 1))
-@@ -72,6 +71,11 @@
+ #define CURSORS_DONE(local) (local->cursor[0].done && local->cursor[1].done)
+-#define CURSOR_NOVA_SELECT(local, player) (local->cursor[player].row == 1 && local->cursor[player].column == 2)
++#define CURSOR_NOVA_SELECT(local, player)                                                                       \
++    (local->cursor[player].pilot_page == 0 && local->cursor[player].row == 1 && local->cursor[player].column == 2)
+ 
+ // Robot page grid: the background's five 51px cells are narrowed to 46px so six fit.
+ #define HAR_CELL_W 46
+@@ -72,6 +72,13 @@
  #define HAR_PANEL_Y 104
  #define PILOT_PANEL_Y 106 // below the pilot's bio box
  
@@ -315,21 +409,30 @@
 +// Championship's (WORLD.TRN), twelve a page, six columns by two rows.
 +#define PILOTS_PER_PAGE 12
 +#define PILOT_PAGES (1 + (TOURNAMENT_PILOTS + PILOTS_PER_PAGE - 1) / PILOTS_PER_PAGE)
++// The robot grid's: the twelve robots, then the hacked ones.
++#define HAR_PAGES 2
 +
  typedef enum
  {
      PILOT_SELECT = 0,
-@@ -93,7 +97,8 @@
+@@ -93,12 +100,13 @@
      object big_portrait_1;
      object big_portrait_2;
      object player2_placeholder;
 -    surface pilot_panel; // six column pilot grid, unselected pilots dimmed
+-    surface har_panel; // six column robot grid, unselected robots in grayscale
 +    surface pilot_panels[PILOT_PAGES]; // six column pilot grid per page, unselected pilots dimmed
 +    int pilot_page_shown;               // the page on screen: the last one a cursor moved on
-     surface har_panel; // six column robot grid, unselected robots in grayscale
++    surface har_panels[HAR_PAGES];      // six column robot grid per page, unselected robots in grayscale
  
      portrait pilot_portraits[NUMBER_OF_PILOT_TYPES]; // Kreissack's (10) stays empty
-@@ -117,6 +122,8 @@
+     portrait har_portraits[NUMBER_OF_HAR_TYPES];
+-    af extra_af[EXTRA_HARS]; // Nova's and Ocelot's portraits and idle animations; MELEE.BK only has ten
++    af extra_af[EXTRA_HARS]; // Nova's, Ocelot's and the hacked ones' idle animations; MELEE.BK only has ten
+ 
+     object har[2];
+ 
+@@ -117,6 +125,8 @@
      text *wins[2];
      text *har_title;
      text *titles[2];
@@ -338,7 +441,7 @@
      text *player_name[2];
      text *player_bio[2];
      text *player_stats[3];
-@@ -131,6 +138,31 @@
+@@ -131,6 +141,42 @@
      bool network_game;
  } melee_local;
  
@@ -348,29 +451,51 @@
 +    if(local->page == PILOT_SELECT && c->pilot_page > 0) {
 +        return PILOT_TOURNAMENT_FIRST + PILOTS_PER_PAGE * (c->pilot_page - 1) + 6 * c->row + c->column;
 +    }
++    if(local->page == HAR_SELECT && c->pilot_page > 0) {
++        return HAR_SUPERJAG + 6 * c->row + c->column;
++    }
 +    if(c->column == EXTRA_COLUMN) {
 +        return (local->page == HAR_SELECT ? HAR_NOVA : PILOT_TRUMP) + c->row;
 +    }
 +    return 5 * c->row + c->column;
 +}
 +
-+// Whether a player's cursor is on a pilot: the last page may have empty cells.
-+static bool pilot_cell_valid(const melee_local *local, int player) {
-+    return local->page != PILOT_SELECT || local->cursor[player].pilot_page == 0 ||
-+           tournament_pilot_get(cursor_index(local, player)) != NULL;
++// Whether a player's cursor is on a pilot or robot: the last pages may have empty cells.
++static bool cell_valid(const melee_local *local, int player) {
++    if(local->cursor[player].pilot_page == 0) {
++        return true;
++    }
++    int index = cursor_index(local, player);
++    return local->page == PILOT_SELECT ? tournament_pilot_get(index) != NULL : index < NUMBER_OF_HAR_TYPES;
++}
++
++// How many pages the grid on screen has.
++static int page_count(const melee_local *local) {
++    return local->page == PILOT_SELECT ? PILOT_PAGES : HAR_PAGES;
 +}
 +
 +static void place_cursor(cursor_data *cursor, selection_page page, unsigned id);
 +
 +// Whether a player's cursor is on the page on screen.
 +static bool cursor_shown(const melee_local *local, int player) {
-+    return local->page != PILOT_SELECT || local->cursor[player].pilot_page == local->pilot_page_shown;
++    return local->cursor[player].pilot_page == local->pilot_page_shown;
 +}
 +
  void handle_action(scene *scene, int player, int action);
  
  void melee_free(scene *scene) {
-@@ -166,15 +198,19 @@
+@@ -140,7 +186,9 @@
+     surface_free(&local->bg_player_stats);
+     surface_free(&local->bg_player_bio);
+     surface_free(&local->har_hilight);
+-    surface_free(&local->har_panel);
++    for(int i = 0; i < HAR_PAGES; i++) {
++        surface_free(&local->har_panels[i]);
++    }
+     for(int i = 0; i < 2; i++) {
+         for(int j = 0; j < STAT_COUNT; j++) {
+             component_free(local->bar_stat[i][j]);
+@@ -166,15 +214,19 @@
          text_free(&local->player_bio[i]);
          text_free(&local->player_name[i]);
          text_free(&local->titles[i]);
@@ -391,7 +516,7 @@
      object_free(&local->big_portrait_1);
      if(player2->selectable) {
          object_free(&local->big_portrait_2);
-@@ -385,10 +421,10 @@
+@@ -385,10 +437,10 @@
      pilot p_a;
      pilot_get_info(&p_a, pilot_id);
  
@@ -406,7 +531,7 @@
      palette_load_player_colors(&player->pilot->palette, player_id);
  }
  
-@@ -406,6 +442,8 @@
+@@ -406,6 +458,8 @@
  
      int old_row = *row;
      int old_column = *column;
@@ -415,56 +540,68 @@
      int last_column = EXTRA_COLUMN;
  
      switch(action) {
-@@ -418,16 +456,23 @@
-                 *column = last_column;
+@@ -419,16 +473,32 @@
                  if(local->page == PILOT_SELECT) {
                      local->cheat_pilot_stats[player] |= *row + 1;
-+                    // web build: past the edge, the previous page of pilots
-+                    *pilot_page = (*pilot_page + PILOT_PAGES - 1) % PILOT_PAGES;
-+                    while(*column > 0 && !pilot_cell_valid(local, player)) {
+                 }
++                // web build: past the edge, the previous page
++                *pilot_page = (*pilot_page + page_count(local) - 1) % page_count(local);
++                while(*column > 0 && !cell_valid(local, player)) {
++                    (*column)--;
++                }
++                if(!cell_valid(local, player)) {
++                    *row = 0; // a short page
++                    while(*column > 0 && !cell_valid(local, player)) {
 +                        (*column)--;
 +                    }
-                 }
++                }
              }
              reset_cursor_blinky(local, player);
              break;
          case ACT_RIGHT:
              (*column)++;
 -            if(*column > last_column) {
-+            if(*column > last_column || !pilot_cell_valid(local, player)) {
++            if(*column > last_column || !cell_valid(local, player)) {
                  *column = 0;
                  if(local->page == PILOT_SELECT) {
                      local->cheat_pilot_stats[player] |= *row + 1;
-+                    // web build: past the edge (or the last pilot), the next page of pilots
-+                    *pilot_page = (*pilot_page + 1) % PILOT_PAGES;
                  }
++                // web build: past the edge (or the last one), the next page
++                *pilot_page = (*pilot_page + 1) % page_count(local);
++                if(!cell_valid(local, player)) {
++                    *row = 0; // a short page
++                }
              }
              reset_cursor_blinky(local, player);
-@@ -441,6 +486,9 @@
+             break;
+@@ -441,6 +511,9 @@
          case ACT_DOWN:
              if(*row == 0) {
                  *row = 1;
-+                if(!pilot_cell_valid(local, player)) {
++                if(!cell_valid(local, player)) {
 +                    *row = 0; // nobody below
 +                }
              }
              reset_cursor_blinky(local, player);
              // nova selection cheat
-@@ -516,6 +564,13 @@
+@@ -516,6 +589,16 @@
                      local->pilot_id_a = CURSOR_INDEX(local, 0);
                      local->pilot_id_b = CURSOR_INDEX(local, 1);
                      local->page = HAR_SELECT;
-+                    // web build: a World Championship pilot starts on the robot it fights with there
++                    // web build: a World Championship pilot starts on the robot it fights with there,
++                    // the others where their cursor was, on the first page
 +                    for(int i = 0; i < 2; i++) {
++                        local->cursor[i].pilot_page = 0;
 +                        const sd_pilot *trn = tournament_pilot_get(i == 0 ? local->pilot_id_a : local->pilot_id_b);
 +                        if(trn && trn->har_id < NUMBER_OF_HAR_TYPES) {
 +                            place_cursor(&local->cursor[i], HAR_SELECT, trn->har_id);
 +                        }
 +                    }
++                    local->pilot_page_shown = 0;
                      update_har(scene, 0);
                      update_har(scene, 1);
  
-@@ -577,11 +632,12 @@
+@@ -577,10 +660,11 @@
              break;
      }
  
@@ -473,30 +610,34 @@
          // column 0..5 → panning -50..+50
          int panning = (*column) * 100 / 5 - 50;
          audio_play_sound_simple(19, panning);
++        local->pilot_page_shown = *pilot_page; // the page follows the cursor
          if(local->page == PILOT_SELECT) {
-+            local->pilot_page_shown = *pilot_page; // the page follows the cursor
              if(player == 0) {
                  local->pilot_id_a = CURSOR_INDEX(local, player);
-             } else {
-@@ -600,32 +656,43 @@
+@@ -600,32 +684,48 @@
      refresh_pilot_stats(local);
  #endif
  
 -    if(*column != EXTRA_COLUMN) {
-+    if(*column != EXTRA_COLUMN && (local->page != PILOT_SELECT || *pilot_page == 0)) {
++    if(*column != EXTRA_COLUMN && *pilot_page == 0) {
          local->cheat_selected[player][5 * (*row) + *column] = 1;
      }
  }
  
 +// Move a cursor to the pilot or HAR `id` on `page`.
 +static void place_cursor(cursor_data *cursor, selection_page page, unsigned id) {
-+    // note: id can be 10 or more (HAR_NOVA, HAR_OCELOT, PILOT_KREISSACK, PILOT_TRUMP, PILOT_MUSK, the
-+    // World Championship's pilots) when returning from VS. The robot page has cells for Nova and
-+    // Ocelot, the pilot pages for Trump, Musk and the tournament's; there are none for Kreissack,
++    // note: id can be 10 or more (HAR_NOVA, HAR_OCELOT, the hacked robots, PILOT_KREISSACK, PILOT_TRUMP,
++    // PILOT_MUSK, the World Championship's pilots) when returning from VS. The robot pages have cells
++    // for Nova, Ocelot and the hacked ones, the pilot pages for Trump, Musk and the tournament's; there
++    // are none for Kreissack,
 +    // which the original game handles surprisingly elegantly. If we try to naively do that, our
 +    // pointers all explode.
 +    cursor->pilot_page = 0;
-+    if(id >= HAR_NOVA && page == HAR_SELECT) {
++    if(id >= HAR_SUPERJAG && id < NUMBER_OF_HAR_TYPES && page == HAR_SELECT) {
++        cursor->pilot_page = 1;
++        cursor->row = (id - HAR_SUPERJAG) / 6;
++        cursor->column = (id - HAR_SUPERJAG) % 6;
++    } else if(id >= HAR_NOVA && page == HAR_SELECT) {
 +        cursor->column = EXTRA_COLUMN;
 +        cursor->row = id - HAR_NOVA;
 +    } else if(id >= PILOT_TOURNAMENT_FIRST && id < NUMBER_OF_PILOT_TYPES && page == PILOT_SELECT) {
@@ -542,7 +683,7 @@
  }
  
  void melee_input_tick(scene *scene) {
-@@ -686,12 +753,16 @@
+@@ -686,12 +786,16 @@
  
  static void render_highlights(const melee_local *local, bool player2_is_selectable) {
      if(player2_is_selectable && CURSORS_MATCH(local)) {
@@ -562,7 +703,7 @@
      }
  }
  
-@@ -759,12 +830,21 @@
+@@ -759,12 +863,21 @@
          text_draw(local->titles[0], 160, 97);
      }
  
@@ -587,7 +728,41 @@
          object_render(&local->big_portrait_2);
      }
  }
-@@ -924,6 +1004,11 @@
+@@ -774,14 +887,20 @@
+ 
+     // render the stupid unselected HAR portraits before anything
+     // so we can render anything else on top of them
+-    video_draw(&local->har_panel, 0, HAR_PANEL_Y);
++    video_draw(&local->har_panels[local->pilot_page_shown], 0, HAR_PANEL_Y);
++    if(local->ticks / 20 % 2 == 0) { // blinking, at the grid's edges: there are more robots past them
++        text_draw(local->page_arrow[0], 0, HAR_CELL_Y(1) - 6);
++        text_draw(local->page_arrow[1], 320 - 7, HAR_CELL_Y(1) - 6);
++    }
+     render_highlights(local, player2_is_selectable);
+ 
+     // currently selected player
+     object_render(&local->big_portrait_1);
+ 
+     // currently selected HAR
+-    render_enabled_portrait(local->har_portraits, CURSOR_INDEX(local, 0), 0);
++    if(cursor_shown(local, 0)) {
++        render_enabled_portrait(local->har_portraits, CURSOR_INDEX(local, 0), 0);
++    }
+     object_render(&local->har[0]);
+ 
+     // player 1 name
+@@ -795,7 +914,9 @@
+         object_render(&local->big_portrait_2);
+ 
+         // currently selected HAR
+-        render_enabled_portrait(local->har_portraits, CURSOR_INDEX(local, 1), 1);
++        if(cursor_shown(local, 1)) {
++            render_enabled_portrait(local->har_portraits, CURSOR_INDEX(local, 1), 1);
++        }
+         object_render(&local->har[1]);
+ 
+         // render HAR name (Har1 VS. Har2)
+@@ -924,6 +1045,11 @@
          portrait *target = &local->pilot_portraits[i];
          int col = i >= PILOT_TRUMP ? EXTRA_COLUMN : i % 5;
          int row = i >= PILOT_TRUMP ? i - PILOT_TRUMP : i / 5;
@@ -599,7 +774,7 @@
          target->x = HAR_CELL_X(col);
          target->y = HAR_CELL_Y(row);
  
-@@ -942,7 +1027,14 @@
+@@ -942,7 +1068,14 @@
  
          // Copy the face image in dimmed color (shown when not selected)
          surface_create_from(&target->disabled, &target->enabled);
@@ -615,7 +790,7 @@
              pilot_pictures_dim(&target->disabled);
          } else {
              surface_compress_index_blocks(&target->disabled, 0x60, 0xA0, 64, 16);
-@@ -953,27 +1045,32 @@
+@@ -953,27 +1086,32 @@
          }
      }
  
@@ -657,7 +832,54 @@
          }
      }
  }
-@@ -1124,6 +1221,24 @@
+@@ -995,17 +1133,30 @@
+         surface_create_from_surface(&target->enabled, HAR_CELL_W, 36, 62 * col + 2, 42 * row, sheet->data);
+         surface_set_transparency(&target->enabled, 0xD0);
+     }
+-    for(int i = HAR_NOVA; i < NUMBER_OF_HAR_TYPES; i++) {
++    for(int i = HAR_NOVA; i < HAR_SUPERJAG; i++) {
+         load_af_portrait(local, i, 0xD0);
+     }
++    // the hacked robots, on the second page: their originals' pictures
++    for(int i = HAR_SUPERJAG; i < NUMBER_OF_HAR_TYPES; i++) {
++        int original = har_original(i);
++        target = &local->har_portraits[i];
++        target->x = HAR_CELL_X((i - HAR_SUPERJAG) % 6);
++        target->y = HAR_CELL_Y((i - HAR_SUPERJAG) / 6);
++        surface_create_from_surface(&target->enabled, HAR_CELL_W, 36, 62 * (original % 5) + 2, 42 * (original / 5),
++                                    sheet->data);
++        surface_set_transparency(&target->enabled, 0xD0);
++    }
+ 
+-    // Six column panel: the background's five column grid, re-cut
++    // Six column panels: the background's five column grid, re-cut
+     const surface *bg = &scene->bk_data->background;
+-    surface_create(&local->har_panel, 320, 200 - HAR_PANEL_Y);
+-    surface_set_transparency(&local->har_panel, -1);
+-    for(int y = 0; y < local->har_panel.h; y++) {
+-        for(int x = 0; x < 320; x++) {
+-            local->har_panel.data[y * 320 + x] = bg->data[(HAR_PANEL_Y + y) * bg->w + har_panel_source_x(x)];
++    for(int page = 0; page < HAR_PAGES; page++) {
++        surface *panel = &local->har_panels[page];
++        surface_create(panel, 320, 200 - HAR_PANEL_Y);
++        surface_set_transparency(panel, -1);
++        for(int y = 0; y < panel->h; y++) {
++            for(int x = 0; x < 320; x++) {
++                panel->data[y * 320 + x] = bg->data[(HAR_PANEL_Y + y) * bg->w + har_panel_source_x(x)];
++            }
+         }
+     }
+ 
+@@ -1027,7 +1178,7 @@
+                 gray.data[k] = 0xD0 + 8 * min2(lum * 3 / 2, 255) / 255;
+             }
+         }
+-        blit_opaque(&local->har_panel, &gray, target->x, target->y - HAR_PANEL_Y);
++        blit_opaque(&local->har_panels[i >= HAR_SUPERJAG], &gray, target->x, target->y - HAR_PANEL_Y);
+         surface_free(&gray);
+     }
+ }
+@@ -1124,6 +1275,24 @@
      local->titles[0] = create_green_text(160, 6, lang_get(187)); // 'choose your pilot'
      local->titles[1] = create_green_text(160, 6, lang_get(186)); // 'choose your robot'
  
@@ -684,7 +906,38 @@
  
 --- a/src/game/scenes/vs.c
 +++ b/src/game/scenes/vs.c
-@@ -683,6 +683,9 @@
+@@ -426,6 +426,12 @@
+     return t;
+ }
+ 
++// The robot's picture in VS.BK: it has the original eleven's and Ocelot's; the hacked robots
++// look like their originals.
++static int vs_har_sprite(int har_id) {
++    return har_id >= HAR_SUPERJAG ? har_original(har_id) : har_id;
++}
++
+ /**
+  * This creates the text object for the arena name and description in 2 player game
+  */
+@@ -575,7 +581,7 @@
+     object *player1_har = omf_calloc(1, sizeof(object));
+     object_create(player1_har, scene->gs, vec2i_create(160, 0), vec2f_create(0, 0));
+     object_set_animation(player1_har, ani);
+-    object_select_sprite(player1_har, player1->pilot->har_id);
++    object_select_sprite(player1_har, vs_har_sprite(player1->pilot->har_id));
+     object_set_halt(player1_har, 1);
+     game_state_add_object(scene->gs, player1_har, RENDER_LAYER_MIDDLE, 0, 0);
+ 
+@@ -583,7 +589,7 @@
+         object *player2_har = omf_calloc(1, sizeof(object));
+         object_create(player2_har, scene->gs, vec2i_create(160, 0), vec2f_create(0, 0));
+         object_set_animation(player2_har, ani);
+-        object_select_sprite(player2_har, player2->pilot->har_id);
++        object_select_sprite(player2_har, vs_har_sprite(player2->pilot->har_id));
+         object_set_direction(player2_har, OBJECT_FACE_LEFT);
+         object_set_pal_offset(player2_har, 48);
+         object_set_pal_limit(player2_har, 96);
+@@ -683,6 +689,9 @@
      } else if(is_spectator(scene->gs)) {
          local->arena_name = create_arena_text(lang_get(56 + scene->gs->arena), (211 - 74), 6);
          local->arena_desc = create_arena_text(lang_get(66 + scene->gs->arena), (211 - 74), 50);
@@ -706,6 +959,50 @@
          int from = menu_block(id), to = dim_block(id);
          for(int i = 0; i < icon->w * icon->h; i++) {
              if(icon->data[i] >= from && icon->data[i] < from + PICTURE_COLORS) {
+--- a/src/resources/ids.c
++++ b/src/resources/ids.c
+@@ -62,6 +62,10 @@
+             return "FIGHTR10.AF";
+         case AF_OCELOT:
+             return "FIGHTR11.AF";
++        case AF_SUPERJAG:
++            return "FIGHTR12.AF";
++        case AF_SHADOW_X:
++            return "FIGHTR13.AF";
+         case PSM_MENU:
+             return "MENU.PSM";
+         case PSM_END:
+@@ -156,6 +160,10 @@
+             return "AF_NOVA";
+         case AF_OCELOT:
+             return "AF_OCELOT";
++        case AF_SUPERJAG:
++            return "AF_SUPERJAG";
++        case AF_SHADOW_X:
++            return "AF_SHADOW_X";
+         case PSM_MENU:
+             return "PSM_MENU";
+         case PSM_END:
+@@ -193,7 +201,7 @@
+ }
+ 
+ int is_har(unsigned int id) {
+-    return (id >= AF_JAGUAR && id <= AF_OCELOT);
++    return (id >= AF_JAGUAR && id <= AF_SHADOW_X);
+ }
+ 
+ int is_music(unsigned int id) {
+--- a/src/resources/ids.h
++++ b/src/resources/ids.h
+@@ -31,6 +31,8 @@
+     AF_CHRONOS,
+     AF_NOVA,
+     AF_OCELOT,
++    AF_SUPERJAG,
++    AF_SHADOW_X,
+     PSM_END,
+     PSM_MENU,
+     PSM_ARENA0,
 --- a/src/resources/pilots.c
 +++ b/src/resources/pilots.c
 @@ -1,6 +1,8 @@
