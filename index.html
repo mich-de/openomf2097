@@ -233,6 +233,11 @@
   $("start").addEventListener("click", async () => {
     if (started) return;
     started = true;
+    // Full screen, in landscape where the browser allows locking it (Android does, in full
+    // screen only). Asked first, while the tap still counts as the player's gesture.
+    document.documentElement.requestFullscreen?.({ navigationUI: "hide" })
+      .then(() => screen.orientation?.lock?.("landscape"))
+      .catch(() => { /* not allowed here: play in the window */ });
     $("start").disabled = true;
     status("LOADING WASM ENGINE...");
 
@@ -293,7 +298,6 @@
           if (slow >= 2 && Module.omfMaxScale > 1) {
             Module.omfMaxScale -= 1;
             Module.omfSpriteScale = Module.omfMaxScale >= 4 ? 4 : Module.omfMaxScale >= 2 ? 2 : 1;
-            try { localStorage.setItem("omf-max-scale", Module.omfMaxScale); } catch (e) { /* no storage */ }
             slow = -1; // give the lighter setting a window to settle
           }
           from = now;
@@ -370,9 +374,9 @@
   const touch = touchQuery !== null ? touchQuery !== "0" : matchMedia("(pointer: coarse)").matches;
   const touchEl = $("touch");
 
-  // The device's quality level, from what the browser tells about it. Software rendering,
-  // few cores or little memory, and phones and tablets get a lighter load; a lower level a
-  // previous session settled on is kept. ?quality=low|mid|high forces one.
+  // The quality level: maximum detail (framebuffer 6x, robots 4x), lowered while playing only
+  // if the frame rate can't keep up, and low where WebGL runs in software.
+  // ?quality=low|mid|high forces one.
   let chosenQuality = null;
   function quality() {
     if (chosenQuality) return chosenQuality;
@@ -386,19 +390,11 @@
         renderer = gl ? String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER)) : "none";
         gl?.getExtension("WEBGL_lose_context")?.loseContext(); // phones keep few contexts: give it back
       } catch (e) { renderer = "none"; }
-      const cores = navigator.hardwareConcurrency || 4, memory = navigator.deviceMemory || 8;
-      if (renderer === "none" || /swiftshader|llvmpipe|softpipe|software|basic render/i.test(renderer)) name = "low";
-      else if (touch || cores <= 4 || memory <= 4) name = "mid";
-      else name = "high";
+      // maximum detail, except where the GPU is emulated in software: there it would not run
+      name = renderer === "none" || /swiftshader|llvmpipe|softpipe|software|basic render/i.test(renderer)
+        ? "low" : "high";
     }
     chosenQuality = { ...levels[name] };
-    try {
-      const saved = parseInt(localStorage.getItem("omf-max-scale"), 10);
-      if (saved > 0 && saved < chosenQuality.maxScale && !new URLSearchParams(location.search).get("quality")) {
-        chosenQuality.maxScale = saved;
-        chosenQuality.spriteScale = saved >= 4 ? 4 : saved >= 2 ? 2 : 1;
-      }
-    } catch (e) { /* no storage */ }
     return chosenQuality;
   }
   const padCv = $("pad"), escCv = $("esc"), punchCv = $("punch"), kickCv = $("kick");
