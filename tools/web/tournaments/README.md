@@ -8,10 +8,6 @@ Only the files the game reads are here: the `.TRN` and its `.PIC`. `trnfix.c` re
 are in its own `.PIC`, named after it (several used `WORLD.PIC`, two were both `MASTER.TRN`, one was `WORLD.TRN`),
 and so that the two whose own `.BK` is not in their download use `WORLD.BK`. Nothing else is changed. Seven of the
 page's tournaments are not in the archive, and the "heavy" downloads are the same tournaments as the "light" ones.
-
-`NOVAW.TRN`'s registration fee is a negative number, -1,794,166,975, so entering it gave a new pilot about 1.8 billion
-instead of costing anything; the engine counts a negative fee as none (`trn_fix_fee()` in
-`tools/web/tournament-pilots.patch`), and the file stays as its author made it.
 Some have pilots whose photo is not in their `.PIC`: those get its first photo (`tools/web/tournament-pilots.patch`, `chr.c`).
 
 | File | Title in the game | Download | Author |
