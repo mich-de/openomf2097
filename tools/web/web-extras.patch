@@ -180,7 +180,64 @@
  #include "formats/altpal.h"
  #include "formats/rec.h"
  #include "game/game_player.h"
-@@ -240,7 +241,16 @@
+@@ -46,16 +47,23 @@
+     const settings *setting = settings_get();
+     // the game's height on screen: the window's, or less when 4:3 leaves bands above and below
+     int game_h = setting->video.aspect == 0 ? min2(drawable_h, drawable_w * 3 / 4) : drawable_h;
+-    // the page may ask for less (phones and tablets: their GPUs struggle at 6x)
+-    int max_scale = clamp(EM_ASM_INT({ return Module.omfMaxScale || 0; }), 0, WEB_MAX_FB_SCALE);
+-    int fb_scale = clamp((game_h + NATIVE_H - 1) / NATIVE_H, 1, max_scale ? max_scale : WEB_MAX_FB_SCALE);
+-    // nearest neighbour scaling by a fraction drops rows; bilinear from the larger
+-    // framebuffer keeps every pixel the same size (CRT stays CRT)
+-    int scaling_mode = setting->video.scaling_mode == 0 ? 1 : setting->video.scaling_mode;
++    int fb_scale, scaling_mode;
++    if(setting->video.fb_scale > 0) {
++        // chosen in the VIDEO menu (and saved): used as it is
++        fb_scale = clamp(setting->video.fb_scale, 1, 8);
++        scaling_mode = setting->video.scaling_mode;
++    } else {
++        // AUTO: about as tall as the screen; the page lowers its cap when the frame rate drops
++        int max_scale = clamp(EM_ASM_INT({ return Module.omfMaxScale || 0; }), 0, WEB_MAX_FB_SCALE);
++        fb_scale = clamp((game_h + NATIVE_H - 1) / NATIVE_H, 1, max_scale ? max_scale : WEB_MAX_FB_SCALE);
++        // nearest neighbour scaling by a fraction drops rows; bilinear from the larger
++        // framebuffer keeps every pixel the same size (CRT stays CRT)
++        scaling_mode = setting->video.scaling_mode == 0 ? 1 : setting->video.scaling_mode;
++    }
+ 
+-    static int last_w, last_h, last_drawable_w, last_drawable_h, last_fb_scale;
++    static int last_w, last_h, last_drawable_w, last_drawable_h, last_fb_scale, last_scaling_mode;
+     if(w == last_w && h == last_h && drawable_w == last_drawable_w && drawable_h == last_drawable_h &&
+-       fb_scale == last_fb_scale) {
++       fb_scale == last_fb_scale && scaling_mode == last_scaling_mode) {
+         return; // our own resize reporting back
+     }
+     last_w = w;
+@@ -63,6 +71,7 @@
+     last_drawable_w = drawable_w;
+     last_drawable_h = drawable_h;
+     last_fb_scale = fb_scale;
++    last_scaling_mode = scaling_mode;
+ 
+     log_info("Web video: canvas %dx%d (%dx%d pixels), framebuffer %dx", w, h, drawable_w, drawable_h, fb_scale);
+     video_reinit(w, h, false, setting->video.vsync, setting->video.aspect, setting->video.framerate_limit, fb_scale,
+@@ -104,9 +113,16 @@
+     // Initialize everything.
+     video_scan_renderers();
+     audio_scan_backends();
++#ifdef __EMSCRIPTEN__
++    // web build: the page owns full screen, and AUTO (0) starts at 1x until web_fit_video()
++    if(!video_init(renderer, w, h, false, vsync, aspect, framerate_limit, max2(fb_scale, 1), scaling_mode)) {
++        goto exit_0;
++    }
++#else
+     if(!video_init(renderer, w, h, fs, vsync, aspect, framerate_limit, fb_scale, scaling_mode)) {
+         goto exit_0;
+     }
++#endif
+ #ifdef __EMSCRIPTEN__
+     web_fit_video();
+ #endif
+@@ -240,7 +256,16 @@
      uint64_t frame_start = SDL_GetTicks64(); // Set game tick timer
      int dynamic_wait = 0;
      int static_wait = 0;
@@ -197,7 +254,7 @@
          // Handle events
          bool check_fs;
          while(SDL_PollEvent(&e)) {
-@@ -250,6 +260,9 @@
+@@ -250,6 +275,9 @@
                      run = 0;
                      break;
                  case SDL_KEYDOWN:
@@ -207,7 +264,7 @@
                      if(e.key.keysym.sym == SDLK_F1) {
                          video_schedule_screenshot(save_screenshot);
                      }
-@@ -429,6 +442,7 @@
+@@ -429,6 +457,7 @@
              has_dynamic = dynamic_wait > dyntick_ms;
              if(has_dynamic) {
                  game_state_dynamic_tick(gs, false);
@@ -465,6 +522,41 @@
              local->text_x = 10;
              local->text_y = 160;
              text_set_color(local->current, 0xF8);
+--- a/src/game/scenes/mainmenu/menu_video.c
++++ b/src/game/scenes/mainmenu/menu_video.c
+@@ -63,6 +63,9 @@
+     int factor;
+     const char *name;
+ } _framebuffer_scaling_factors[] = {
++#ifdef __EMSCRIPTEN__
++    {0, "AUTO"}, // web build: fit the screen, lowered when the frame rate drops
++#endif
+     {1, "1x"},
+     {2, "2x"},
+     {4, "4x"},
+@@ -181,6 +184,9 @@
+     } else {
+         menu_finish(component_get_parent(c));
+     }
++#ifdef __EMSCRIPTEN__
++    settings_save(); // web build: kept by the page across visits, used at the next start
++#endif
+ }
+ 
+ void menu_video_free(component *c) {
+--- a/src/game/scenes/mainmenu/menu_video_confirm.c
++++ b/src/game/scenes/mainmenu/menu_video_confirm.c
+@@ -36,6 +36,10 @@
+                      v->scaling_mode);
+     }
+ 
++#ifdef __EMSCRIPTEN__
++    settings_save(); // web build: the saved settings go back too
++#endif
++
+     // Finish the menu
+     menu_finish(component_get_parent(c));
+ }
 --- a/src/game/scenes/melee.c
 +++ b/src/game/scenes/melee.c
 @@ -23,6 +23,7 @@
@@ -1213,7 +1305,19 @@
  
 --- a/src/game/utils/settings.c
 +++ b/src/game/utils/settings.c
-@@ -106,7 +106,11 @@
+@@ -78,7 +78,11 @@
+     F_INT(settings_video, scaling_mode, 0),
+     F_BOOL(settings_video, instant_console, 0),
+     F_BOOL(settings_video, crossfade_on, 1),
++#ifdef __EMSCRIPTEN__
++    F_INT(settings_video, fb_scale, 0), // web build: 0 is AUTO, see web_fit_video()
++#else
+     F_INT(settings_video, fb_scale, 1),
++#endif
+ };
+ 
+ const field f_sound[] = {
+@@ -106,7 +110,11 @@
  };
  
  const field f_advanced[] = {
@@ -1248,4 +1352,24 @@
 +            pilot->color_3 = 0;
 +            break;
      }
+ }
+--- a/src/video/video.c
++++ b/src/video/video.c
+@@ -185,6 +185,17 @@
+ 
+ bool video_reinit(int window_w, int window_h, bool fullscreen, bool vsync, int aspect, int framerate_limit,
+                   int fb_scale, int scaling_mode) {
++#ifdef __EMSCRIPTEN__
++    // Web build: the window is the page's canvas, sized and put in full screen by the page;
++    // a menu's resolution or full screen choice must not change it. AUTO (0) is fitted by
++    // the engine's web_fit_video() right after.
++    SDL_Window *window = SDL_GL_GetCurrentWindow();
++    if(window != NULL) {
++        SDL_GetWindowSize(window, &window_w, &window_h);
++    }
++    fullscreen = false;
++    fb_scale = fb_scale < 1 ? 1 : fb_scale;
++#endif
+     return current_renderer.reset_context_with(current_renderer.ctx, window_w, window_h, fullscreen, vsync, aspect,
+                                                framerate_limit, fb_scale, scaling_mode);
  }

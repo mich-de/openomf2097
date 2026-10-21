@@ -220,7 +220,7 @@ DUMMY=$B/shim/libdummy.a
 [ -f "$DUMMY" ] || { echo 'int omf_dummy;' > "$B/shim/dummy.c"; emcc -c "$B/shim/dummy.c" -o "$B/shim/dummy.o"; emar rcs "$DUMMY" "$B/shim/dummy.o"; }
 
 EM_FLAGS="-O2 -I$DEPS/include -sUSE_SDL=2 -sUSE_SDL_MIXER=2 -sUSE_ZLIB=1 -sUSE_LIBPNG=1 -sFULL_ES3=1 -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2"
-EM_LINK="$EM_FLAGS -sFORCE_FILESYSTEM=1 -sALLOW_MEMORY_GROWTH=1 -sASYNCIFY -sEXIT_RUNTIME=1 -sENVIRONMENT=web -sEXPORTED_RUNTIME_METHODS=FS --preload-file $DATA@/"
+EM_LINK="$EM_FLAGS -sFORCE_FILESYSTEM=1 -sALLOW_MEMORY_GROWTH=1 -sASYNCIFY -sEXIT_RUNTIME=1 -sENVIRONMENT=web -sEXPORTED_RUNTIME_METHODS=FS -lidbfs.js --preload-file $DATA@/"
 [ "${OMF_EM_DEBUG:-0}" = 1 ] && { EM_FLAGS="$EM_FLAGS -DDEBUGMODE"; EM_LINK="$EM_LINK -sASSERTIONS=1"; }
 
 emcmake cmake -S "$SRC" -B "$BUILD" \

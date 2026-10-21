@@ -264,7 +264,30 @@
       },
       print: (t) => { (window.__omflog = window.__omflog || []).push(String(t)); console.log("[omf]", t); },
       printErr: (t) => { (window.__omflog = window.__omflog || []).push("E " + t); console.warn("[omf]", t); },
-      onRuntimeInitialized: () => { status("RUNTIME READY"); },
+      // The engine's settings (the VIDEO menu's too), scores and log live in SDL's preferences
+      // folder: kept in the browser (IndexedDB), so a setting chosen once is used every time.
+      // (preRun runs before Module.FS is set: the engine script's own globals, FS and IDBFS)
+      preRun: [() => {
+        const FS = window.FS;
+        try { FS.mkdir("/libsdl"); } catch (e) { /* exists */ }
+        try {
+          FS.mount(window.IDBFS, {}, "/libsdl");
+          window.addRunDependency("saved-settings");
+          FS.syncfs(true, () => window.removeRunDependency("saved-settings"));
+        } catch (e) { problems.push("settings are not kept: " + e); }
+      }],
+      onRuntimeInitialized: () => {
+        status("RUNTIME READY");
+        let saving = false;
+        const save = () => {
+          if (saving) return;
+          saving = true;
+          Module.FS.syncfs(false, () => { saving = false; });
+        };
+        setInterval(save, 5000);
+        addEventListener("pagehide", save);
+        document.addEventListener("visibilitychange", () => { if (document.hidden) save(); });
+      },
       onExit: (c) => {
         (window.__omflog = window.__omflog || []).push("EXIT code " + c);
         status("GAME CLOSED (code " + c + ")");
