@@ -117,6 +117,12 @@
     width: 100%; height: 100%; object-fit: contain;
     image-rendering: pixelated; outline: none;
   }
+  /* What went wrong, over the game: shown on errors, and always with ?debug=1. */
+  #diag {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 20; max-height: 50vh; overflow: auto;
+    margin: 0; padding: 6px 8px; background: rgba(0, 0, 0, .85); color: #c8c8ff;
+    font: 11px/1.35 monospace; white-space: pre-wrap; word-break: break-all;
+  }
   /* Floating buttons: full screen, and back when the game has quit. */
   #tools {
     position: fixed; z-index: 11;
@@ -168,6 +174,7 @@
   </div>
 </main>
 
+<pre id="diag" hidden></pre>
 <div id="stage-game">
   <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="0"></canvas>
 </div>
@@ -187,6 +194,40 @@
   "use strict";
   const $ = (id) => document.getElementById(id);
   const status = (s) => { $("status").textContent = s; };
+
+  // Diagnostics: errors, and with ?debug=1 the GPU, sizes, quality and the engine's log
+  // (release builds write it to /openomf.log only), in a panel over the game.
+  const debug = new URLSearchParams(location.search).has("debug");
+  const problems = [];
+  let renderer = "?";
+  const engineLog = () => {
+    // the engine keeps it in SDL's preferences folder
+    for (const path of ["/libsdl/OpenOMF/openomf.log", "/openomf.log"]) {
+      try { return window.Module.FS.readFile(path, { encoding: "utf8" }); } catch (e) { /* not there */ }
+    }
+    return "";
+  };
+  function showDiag(title) {
+    const canvas = $("canvas"), q = window.Module || {};
+    const lines = [
+      title,
+      "GPU: " + renderer,
+      "screen " + screen.width + "x" + screen.height + " @" + devicePixelRatio + ", canvas " + canvas.width + "x" + canvas.height,
+      "quality: framebuffer up to " + q.omfMaxScale + "x, robots " + q.omfSpriteScale + "x",
+      ...problems.slice(-8),
+      "--- engine log ---",
+      ...engineLog().trim().split("\n").slice(-25),
+      ...(window.__omflog || []).filter((l) => l.startsWith("E ") && l.trim() !== "E").slice(-8),
+    ];
+    $("diag").textContent = lines.join("\n");
+    $("diag").hidden = false;
+  }
+  const problem = (what) => {
+    problems.push(what);
+    if (started) showDiag("THE GAME STOPPED: tell me what this says (or send a screenshot)");
+  };
+  addEventListener("error", (e) => problem("error: " + e.message + " @" + (e.filename || "") + ":" + (e.lineno || "")));
+  addEventListener("unhandledrejection", (e) => problem("rejected: " + (e.reason && (e.reason.stack || e.reason))));
 
   let started = false;
   $("start").addEventListener("click", async () => {
@@ -223,8 +264,9 @@
         status("GAME CLOSED (code " + c + ")");
         $("back").hidden = false;
         $("tools").classList.remove("idle");
+        if (c !== 0) problem("the engine exited with code " + c);
       },
-      onAbort: (why) => status("FAILED: " + why),
+      onAbort: (why) => { status("FAILED: " + why); problem("abort: " + why); },
     };
     window.Module = Module;
 
@@ -261,6 +303,8 @@
       };
       requestAnimationFrame(step);
     };
+
+    if (debug) setInterval(() => showDiag("DEBUG (?debug=1)"), 1000);
 
     const on = () => {
       setTimeout(watchFrameRate, 8000); // loading the first scene is not a frame rate
@@ -336,11 +380,11 @@
                      high: { maxScale: 6, spriteScale: 4 } };
     let name = new URLSearchParams(location.search).get("quality");
     if (!levels[name]) {
-      let renderer = "";
       try {
         const gl = document.createElement("canvas").getContext("webgl2");
         const info = gl && gl.getExtension("WEBGL_debug_renderer_info");
         renderer = gl ? String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER)) : "none";
+        gl?.getExtension("WEBGL_lose_context")?.loseContext(); // phones keep few contexts: give it back
       } catch (e) { renderer = "none"; }
       const cores = navigator.hardwareConcurrency || 4, memory = navigator.deviceMemory || 8;
       if (renderer === "none" || /swiftshader|llvmpipe|softpipe|software|basic render/i.test(renderer)) name = "low";
