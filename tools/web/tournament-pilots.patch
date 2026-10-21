@@ -599,7 +599,7 @@
  
  void pilot_get_info(pilot *pilot, int id) {
      // TODO read this from MASTER.DAT
-@@ -114,5 +116,22 @@
+@@ -114,5 +116,23 @@
              pilot->color_2 = 10;
              pilot->color_3 = 0;
              break;
@@ -613,10 +613,11 @@
 +            pilot->power = clamp((p->power * 30 + 22) / 44, 1, 20);
 +            pilot->agility = clamp((p->agility * 30 + 22) / 44, 1, 20);
 +            pilot->endurance = clamp((p->endurance * 30 + 22) / 44, 1, 20);
-+            // 0..15: an altpal, 16: the pilot's own colors, 255: any, here one per pilot
-+            pilot->color_1 = p->color_1 <= 16 ? p->color_1 : (id * 5) % 16;
-+            pilot->color_2 = p->color_2 <= 16 ? p->color_2 : (id * 5 + 7) % 16;
-+            pilot->color_3 = p->color_3 <= 16 ? p->color_3 : (id * 5 + 11) % 16;
++            // 16: the robot in the colors drawn for the pilot (its photo's), as the tournament
++            // paints it whatever WORLD.TRN says (chr.c)
++            pilot->color_1 = 16;
++            pilot->color_2 = 16;
++            pilot->color_3 = 16;
 +            pilot->sex = tournament_pilot_sex(id);
 +            break;
 +        }
